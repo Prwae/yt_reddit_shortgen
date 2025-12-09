@@ -19,12 +19,17 @@ youtube_token.json
 
 # Output files
 output/
+daily_packs/
 *.mp4
 *.mp3
 *.wav
+# Allow small video assets (avatar, nickname) but exclude large video files
 *.png
+!videos/avatar/*.png
 *.jpg
+!videos/avatar/*.jpg
 *.jpeg
+!videos/avatar/*.jpeg
 
 # Temporary files
 temp_*
@@ -42,10 +47,12 @@ temp_*
 Thumbs.db
 
 # Project specific
+# Exclude large video/music files (users should add their own)
 videos/backgrounds/*
 videos/music/*
-!videos/backgrounds/.gitkeep
-!videos/music/.gitkeep
+# But allow small text files
+!videos/**/*.txt
+!videos/**/*.gitkeep
 
 
 
