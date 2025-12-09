@@ -25,13 +25,24 @@ This guide explains how to set up YouTube API credentials for automatic video up
 
 1. Go to "APIs & Services" → "Credentials"
 2. Click "Create Credentials" → "OAuth client ID"
-3. If prompted, configure the OAuth consent screen:
-   - Choose "External" user type
-   - Fill in required fields (App name, User support email, Developer contact)
-   - Add your email to test users
-   - Save and continue through scopes (default is fine)
-   - Save and continue through test users
+3. Configure the OAuth consent screen (IMPORTANT):
+   - Go to "APIs & Services" → "OAuth consent screen"
+   - Choose "External" user type (unless you have a Google Workspace)
+   - Fill in required fields:
+     * App name: "YT Uploader" (or any name)
+     * User support email: Your email
+     * Developer contact: Your email
+   - Click "Save and Continue"
+   - On "Scopes" page: Click "Save and Continue" (default scopes are fine)
+   - On "Test users" page: **CRITICAL STEP**
+     * Click "+ ADD USERS"
+     * Add your Google account email (the one you'll use to authenticate)
+     * Add any other emails that need access
+     * Click "Add"
+     * Click "Save and Continue"
    - Back to dashboard
+   
+   **IMPORTANT**: If you get "Error 403: access_denied", it means your email is not in the test users list. Go back to OAuth consent screen → Test users and add your email.
 4. Create OAuth client ID:
    - Application type: **Desktop app**
    - Name: "Reddit Reads Uploader" (or any name)
