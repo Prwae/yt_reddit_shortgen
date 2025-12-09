@@ -42,13 +42,39 @@ This guide explains how to set up YouTube API credentials for automatic video up
 
 ## Step 4: First-Time Authentication
 
-When you run `server_scheduler.py` for the first time:
+### Option A: Local Machine (with browser)
+
+When you run `server_scheduler.py` for the first time on a machine with a browser:
 
 1. A browser window will open automatically
 2. Sign in with your Google account (the one associated with your YouTube channel)
 3. Click "Advanced" → "Go to [Your App Name] (unsafe)" if you see a warning
 4. Click "Allow" to grant permissions
 5. The token will be saved to `youtube_token.json` automatically
+
+### Option B: Headless Server (no browser)
+
+For Linux servers without a browser, use the standalone authentication script:
+
+1. **Install dependencies:**
+   ```bash
+   pip install google-auth-oauthlib
+   ```
+
+2. **Run the authentication script:**
+   ```bash
+   python youtube_auth_headless.py
+   ```
+
+3. **Follow the prompts:**
+   - The script will display a URL
+   - Open that URL in a browser on any device (your local computer, phone, etc.)
+   - Sign in with your Google account
+   - Grant permissions
+   - Copy the authorization code
+   - Paste it back into the terminal on your server
+
+4. **The token will be saved automatically** to `youtube_token.json`
 
 **Note:** The token will be reused for future uploads. You only need to authenticate once unless the token expires.
 
