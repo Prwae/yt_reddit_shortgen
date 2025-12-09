@@ -18,6 +18,11 @@ from src.config import BASE_DIR
 # YouTube API scopes
 SCOPES = ['https://www.googleapis.com/auth/youtube.upload']
 
+
+class QuotaExceededError(Exception):
+    """Raised when YouTube API quota is exceeded"""
+    pass
+
 # YouTube API configuration
 CLIENT_SECRETS_FILE = BASE_DIR / "client_secrets.json"
 TOKEN_FILE = BASE_DIR / "youtube_token.json"
@@ -170,6 +175,13 @@ class YouTubeUploader:
         except HttpError as e:
             error_details = json.loads(e.content.decode('utf-8'))
             error_msg = error_details.get('error', {}).get('message', str(e))
+            error_code = error_details.get('error', {}).get('code', e.resp.status)
+            
+            # Check for quota/rate limit errors
+            if e.resp.status == 429 or 'quota' in error_msg.lower() or 'rate limit' in error_msg.lower():
+                print(f"❌ YouTube API quota/rate limit exceeded: {error_msg}")
+                raise QuotaExceededError(f"YouTube API quota exceeded: {error_msg}")
+            
             print(f"❌ YouTube upload failed: {error_msg}")
             raise Exception(f"YouTube upload error: {error_msg}")
     

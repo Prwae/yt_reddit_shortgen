@@ -2,14 +2,13 @@
 24/7 daily video generator/uploader runner.
 
 Behavior:
+- Starts daily cycles at midnight Pacific Time
 - Once every 24 hours: generate a daily "pack" of videos into a non-output folder.
 - Each daily pack goes under DAILY_PACKS_DIR/YYYYMMDD/.
 - Generate videos until credits/quota are exhausted (or generation fails).
 - Upload all videos for the day at evenly spaced intervals over 24h.
 - Do not start the next day's generation until all uploads for the current pack finish.
 - Keep only the last 3 daily packs (delete anything older than 2 days).
-
-Note: upload_video() is a stub — replace with real upload logic.
 """
 
 from __future__ import annotations
@@ -19,6 +18,19 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    # Python < 3.9 fallback
+    try:
+        import pytz
+        ZoneInfo = None  # Will use pytz instead
+    except ImportError:
+        raise ImportError(
+            "Timezone support requires Python 3.9+ (zoneinfo) or pytz package.\n"
+            "Install pytz: pip install pytz"
+        )
 
 from main_pipeline import VideoPipeline
 from src.config import BASE_DIR, YOUTUBE_PRIVACY_STATUS
@@ -32,9 +44,48 @@ PACK_RETENTION_DAYS = 3  # keep today + previous 2 days
 RUN_INTERVAL_HOURS = 24
 MANIFEST_NAME = "manifest.json"
 
+# Pacific Time zone (handles PST/PDT automatically)
+if ZoneInfo:
+    PACIFIC_TZ = ZoneInfo("America/Los_Angeles")
+else:
+    PACIFIC_TZ = pytz.timezone("America/Los_Angeles")
+
+
+def _now_pacific() -> datetime:
+    """Get current time in Pacific Time."""
+    if ZoneInfo:
+        return datetime.now(PACIFIC_TZ)
+    else:
+        return datetime.now(pytz.UTC).astimezone(PACIFIC_TZ)
+
 
 def _today_str() -> str:
-    return datetime.utcnow().strftime("%Y%m%d")
+    """Get today's date string in Pacific Time."""
+    return _now_pacific().strftime("%Y%m%d")
+
+
+def _next_midnight_pacific() -> datetime:
+    """Calculate next midnight Pacific Time."""
+    now = _now_pacific()
+    
+    if ZoneInfo:
+        # Using zoneinfo (Python 3.9+)
+        midnight_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        if now >= midnight_today:
+            midnight_today += timedelta(days=1)
+    else:
+        # Using pytz
+        today = now.date()
+        midnight_today = PACIFIC_TZ.localize(
+            datetime(today.year, today.month, today.day, 0, 0, 0)
+        )
+        if now >= midnight_today:
+            tomorrow = today + timedelta(days=1)
+            midnight_today = PACIFIC_TZ.localize(
+                datetime(tomorrow.year, tomorrow.month, tomorrow.day, 0, 0, 0)
+            )
+    
+    return midnight_today
 
 
 def _load_manifest(pack_dir: Path) -> Dict:
@@ -52,14 +103,21 @@ def _save_manifest(pack_dir: Path, manifest: Dict) -> None:
 
 
 def _is_credit_error(err: Exception) -> bool:
+    """Check if error is related to API quota/credits."""
+    from src.youtube_uploader import QuotaExceededError
+    
+    # Check for YouTube quota errors
+    if isinstance(err, QuotaExceededError):
+        return True
+    
     msg = str(err).lower()
-    keywords = ["quota", "credit", "insufficient", "limit", "billing", "exceeded"]
+    keywords = ["quota", "credit", "insufficient", "limit", "billing", "exceeded", "rate limit"]
     return any(k in msg for k in keywords)
 
 
 def _cleanup_old_packs() -> None:
     """Delete packs older than PACK_RETENTION_DAYS."""
-    cutoff = datetime.utcnow().date() - timedelta(days=PACK_RETENTION_DAYS - 1)
+    cutoff = _now_pacific().date() - timedelta(days=PACK_RETENTION_DAYS - 1)
     for item in DAILY_PACKS_DIR.iterdir():
         if not item.is_dir():
             continue
@@ -114,12 +172,18 @@ def _schedule_uploads(manifest: Dict, pack_dir: Path) -> None:
         print("✓ All videos already uploaded for this pack.")
         return
 
-    interval_seconds = 24 * 3600 / max(1, len(videos))
-    start_time = datetime.utcnow()
+    # Calculate interval: spread uploads evenly over 24 hours
+    # But ensure minimum 1 hour between uploads to avoid rate limits
+    # YouTube default quota: ~6 uploads/day (1,600 units per upload, 10,000 units/day)
+    min_interval_seconds = 3600  # 1 hour minimum between uploads
+    ideal_interval = 24 * 3600 / max(1, len(videos))
+    interval_seconds = max(ideal_interval, min_interval_seconds)
+    
+    start_time = _now_pacific()
 
     for idx, video in enumerate(pending):
         scheduled_time = start_time + timedelta(seconds=interval_seconds * idx)
-        wait_seconds = (scheduled_time - datetime.utcnow()).total_seconds()
+        wait_seconds = (scheduled_time - _now_pacific()).total_seconds()
         if wait_seconds > 0:
             print(f"⏳ Waiting {wait_seconds/60:.1f} minutes until next upload slot...")
             time.sleep(wait_seconds)
@@ -134,7 +198,7 @@ def _schedule_uploads(manifest: Dict, pack_dir: Path) -> None:
             
             # Update manifest with upload info
             video["uploaded"] = True
-            video["uploaded_at"] = datetime.utcnow().isoformat()
+            video["uploaded_at"] = _now_pacific().isoformat()
             video["youtube_video_id"] = upload_result.get("video_id")
             video["youtube_url"] = upload_result.get("video_url")
             _save_manifest(pack_dir, manifest)
@@ -144,7 +208,14 @@ def _schedule_uploads(manifest: Dict, pack_dir: Path) -> None:
             import traceback
             traceback.print_exc()
             _save_manifest(pack_dir, manifest)
-            # Stop further uploads to avoid cascading issues; retry next cycle
+            
+            # Check if it's a quota error - stop all uploads and wait for next day
+            if _is_credit_error(e):
+                print("⚠️  YouTube API quota exceeded. Stopping uploads for today.")
+                print("   Remaining videos will be uploaded tomorrow when quota resets.")
+                break
+            
+            # For other errors, stop to avoid cascading issues; retry next cycle
             break
 
 
@@ -173,7 +244,7 @@ def _generate_daily_pack(pack_dir: Path) -> Dict:
                     "output_dir": result["output_dir"],
                     "uploaded": False,
                     "uploaded_at": None,
-                    "generated_at": datetime.utcnow().isoformat(),
+                    "generated_at": _now_pacific().isoformat(),
                 }
             )
             _save_manifest(pack_dir, manifest)
@@ -189,12 +260,24 @@ def _generate_daily_pack(pack_dir: Path) -> Dict:
 
 def run_forever() -> None:
     """Main loop: daily generation + scheduled uploads, forever."""
+    # Wait until next midnight Pacific Time before starting
+    next_midnight = _next_midnight_pacific()
+    now = _now_pacific()
+    wait_seconds = (next_midnight - now).total_seconds()
+    
+    if wait_seconds > 0:
+        wait_hours = wait_seconds / 3600
+        print(f"⏰ Waiting until midnight Pacific Time ({next_midnight.strftime('%Y-%m-%d %H:%M:%S %Z')})")
+        print(f"   Current Pacific Time: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+        print(f"   Waiting {wait_hours:.2f} hours...")
+        time.sleep(wait_seconds)
+    
     while True:
-        cycle_start = datetime.utcnow()
+        cycle_start = _now_pacific()
         today = _today_str()
         pack_dir = DAILY_PACKS_DIR / today
 
-        print(f"\n=== Daily cycle start for {today} ===")
+        print(f"\n=== Daily cycle start for {today} (Pacific Time: {cycle_start.strftime('%Y-%m-%d %H:%M:%S %Z')}) ===")
         _cleanup_old_packs()
 
         manifest = _load_manifest(pack_dir)
@@ -209,11 +292,13 @@ def run_forever() -> None:
         else:
             _schedule_uploads(manifest, pack_dir)
 
-        # Sleep until next 24h tick from cycle start
-        next_run = cycle_start + timedelta(hours=RUN_INTERVAL_HOURS)
-        sleep_seconds = (next_run - datetime.utcnow()).total_seconds()
+        # Sleep until next midnight Pacific Time
+        next_midnight = _next_midnight_pacific()
+        now = _now_pacific()
+        sleep_seconds = (next_midnight - now).total_seconds()
         if sleep_seconds > 0:
-            print(f"🛌 Sleeping {sleep_seconds/3600:.1f} hours until next cycle...")
+            wait_hours = sleep_seconds / 3600
+            print(f"🛌 Sleeping {wait_hours:.2f} hours until next midnight Pacific Time ({next_midnight.strftime('%Y-%m-%d %H:%M:%S %Z')})...")
             time.sleep(sleep_seconds)
 
 
