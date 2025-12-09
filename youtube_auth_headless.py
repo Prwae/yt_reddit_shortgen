@@ -2,7 +2,7 @@
 Standalone YouTube OAuth authentication script for headless servers.
 
 This script can be run on a server without a browser to authenticate YouTube API.
-It uses the console flow which provides a URL to open in a browser and a code to paste back.
+It uses a manual OAuth flow which provides a URL to open in a browser and a code to paste back.
 
 Usage:
     python youtube_auth_headless.py
@@ -14,9 +14,10 @@ from pathlib import Path
 
 try:
     from google_auth_oauthlib.flow import InstalledAppFlow
+    from google.oauth2.credentials import Credentials
 except ImportError:
-    print("❌ google-auth-oauthlib not installed!")
-    print("   Install with: pip install google-auth-oauthlib")
+    print("❌ Required packages not installed!")
+    print("   Install with: pip install google-auth-oauthlib google-auth")
     exit(1)
 
 # YouTube API scopes
@@ -44,7 +45,7 @@ def main():
         print("5. Download and save as: client_secrets.json")
         exit(1)
     
-    print("🔐 Starting YouTube OAuth authentication (console flow)...")
+    print("🔐 Starting YouTube OAuth authentication (manual flow)...")
     print(f"   Client secrets: {CLIENT_SECRETS_FILE}")
     print(f"   Token will be saved to: {TOKEN_FILE}\n")
     
@@ -54,27 +55,44 @@ def main():
         SCOPES
     )
     
-    # Run console flow (for headless servers)
-    # This will print a URL to open in browser and ask for the authorization code
+    # Get authorization URL
+    flow.redirect_uri = 'urn:ietf:wg:oauth:2.0:oob'  # Out-of-band flow
+    
+    auth_url, _ = flow.authorization_url(prompt='consent')
+    
+    # Display instructions
     print("=" * 60)
-    print("CONSOLE FLOW - Follow these steps:")
+    print("MANUAL AUTHENTICATION - Follow these steps:")
     print("=" * 60)
-    print("1. A URL will be displayed below")
-    print("2. Open that URL in a browser (on any device)")
-    print("3. Sign in with your Google account")
-    print("4. Grant permissions")
-    print("5. Copy the authorization code")
-    print("6. Paste it here when prompted")
+    print("1. Open this URL in a browser (on any device):")
+    print()
+    print(f"   {auth_url}")
+    print()
+    print("2. Sign in with your Google account")
+    print("3. Grant permissions to the application")
+    print("4. You will see an authorization code")
+    print("5. Copy that code and paste it below")
     print("=" * 60)
     print()
     
+    # Get authorization code from user
     try:
-        creds = flow.run_console()
+        auth_code = input("Enter the authorization code: ").strip()
     except KeyboardInterrupt:
         print("\n❌ Authentication cancelled by user")
         exit(1)
+    
+    if not auth_code:
+        print("❌ No authorization code provided")
+        exit(1)
+    
+    # Exchange code for credentials
+    try:
+        flow.fetch_token(code=auth_code)
+        creds = flow.credentials
     except Exception as e:
-        print(f"\n❌ Authentication failed: {e}")
+        print(f"\n❌ Failed to exchange code for token: {e}")
+        print("   Make sure you copied the entire authorization code")
         exit(1)
     
     # Save credentials
