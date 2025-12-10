@@ -1,23 +1,20 @@
 """
-TTS Narration Module - Gemini native TTS (preview) with HuggingFace fallback
+TTS Narration Module - Gemini native TTS (no fallbacks)
 """
 from pathlib import Path
 from typing import Optional
 import random
-import base64
 import wave
-import requests
 
 from .config import (
     TTS_PROVIDER, TTS_VOICE, TTS_RATE, TTS_PITCH, OUTPUT_DIR,
     GEMINI_API_KEY, GEMINI_API_KEYS, GEMINI_TTS_MODEL, GEMINI_TTS_VOICE_NAME, GEMINI_TTS_VOICES,
-    GEMINI_TTS_RANDOMIZE, GEMINI_TTS_SAMPLE_RATE, GEMINI_TTS_STYLE_NOTE,
-    HUGGINGFACE_TTS_URL
+    GEMINI_TTS_RANDOMIZE, GEMINI_TTS_SAMPLE_RATE, GEMINI_TTS_STYLE_NOTE
 )
 
 
 class TTSGenerator:
-    """Generates text-to-speech narration using Gemini (default) or HuggingFace fallback."""
+    """Generates text-to-speech narration using Gemini only."""
 
     def __init__(self, 
                  provider: Optional[str] = None,
@@ -26,7 +23,7 @@ class TTSGenerator:
         # Gemini/HF do not return word timings; keep for API compatibility
         self.word_timings = []
         self.provider = provider or TTS_PROVIDER
-        self.voice = voice or TTS_VOICE  # not used by Gemini/HF, but kept
+        self.voice = voice or TTS_VOICE  # kept for compatibility
 
         # Choose Gemini voice
         if self.provider == "gemini":
@@ -41,12 +38,11 @@ class TTSGenerator:
         else:
             self.gemini_voice = "Kore"
 
-        # Provider availability checks and fallbacks
-        if self.provider == "gemini" and not GEMINI_API_KEYS:
-            print("⚠️  No Gemini API keys set. Falling back to HuggingFace TTS.")
-            self.provider = "huggingface"
-        if self.provider == "huggingface" and not HUGGINGFACE_TTS_URL:
-            raise ValueError("HUGGINGFACE_TTS_URL not configured.")
+        # Provider availability checks
+        if not GEMINI_API_KEYS:
+            raise ValueError("No Gemini API keys set. Set GEMINI_API_KEY in .env.")
+        # Force provider to gemini
+        self.provider = "gemini"
 
     def generate_audio(self, text: str, output_path: Optional[str] = None) -> str:
         """Generate TTS audio and return path."""
@@ -58,12 +54,7 @@ class TTSGenerator:
         if not output_path.lower().endswith(".wav"):
             output_path = str(Path(output_path).with_suffix(".wav"))
 
-        if self.provider == "gemini":
-            return self._generate_gemini_tts(text, output_path)
-        if self.provider == "huggingface":
-            return self._generate_huggingface_tts(text, output_path)
-
-        # Default to Gemini if an unknown provider is passed
+        # Only Gemini is supported
         return self._generate_gemini_tts(text, output_path)
 
     def _generate_gemini_tts(self, text: str, output_path: str) -> str:
@@ -154,71 +145,7 @@ class TTSGenerator:
                         raise
 
         # All keys failed
-        print(f"⚠️  All Gemini API keys failed. Last error: {last_exception}")
-        print("   Falling back to HuggingFace TTS.")
-        self.provider = "huggingface"
-        return self._generate_huggingface_tts(text, output_path)
-
-    def _extract_audio_bytes_from_hf(self, data_item):
-        """Attempt to extract audio bytes from a HuggingFace Space response item."""
-        content = None
-        if isinstance(data_item, dict):
-            content = data_item.get("data") or data_item.get("url")
-        elif isinstance(data_item, str):
-            content = data_item
-
-        if not content:
-            return None
-
-        # data:audio/wav;base64,...
-        if isinstance(content, str) and content.startswith("data:audio"):
-            try:
-                b64_part = content.split(",", 1)[1]
-                return base64.b64decode(b64_part)
-            except Exception:
-                return None
-
-        # raw base64
-        if isinstance(content, str):
-            try:
-                return base64.b64decode(content)
-            except Exception:
-                return None
-
-        return None
-
-    def _generate_huggingface_tts(self, text: str, output_path: str) -> str:
-        """Generate audio via HuggingFace Space fallback."""
-        if not HUGGINGFACE_TTS_URL:
-            raise ValueError("HUGGINGFACE_TTS_URL not configured.")
-
-        api_url = HUGGINGFACE_TTS_URL.rstrip("/") + "/api/predict"
-        payload = {"data": [text]}
-
-        try:
-            resp = requests.post(api_url, json=payload, timeout=180)
-            resp.raise_for_status()
-            resp_json = resp.json()
-
-            audio_bytes = None
-            if isinstance(resp_json, dict) and "data" in resp_json:
-                for item in resp_json["data"]:
-                    audio_bytes = self._extract_audio_bytes_from_hf(item)
-                    if audio_bytes:
-                        break
-
-            if not audio_bytes:
-                raise RuntimeError(f"HuggingFace TTS returned no audio. Response keys: {list(resp_json.keys())}")
-
-            with open(output_path, "wb") as f:
-                f.write(audio_bytes)
-
-            self.word_timings = []  # No timings available
-            print("✓ Generated audio with HuggingFace TTS (no word timings provided)")
-            return output_path
-
-        except Exception as e:
-            raise RuntimeError(f"HuggingFace TTS failed: {e}")
+        raise RuntimeError(f"All Gemini API keys failed. Last error: {last_exception}")
 
 
 def generate_narration(text: str, 
@@ -232,12 +159,12 @@ def generate_narration(text: str,
         text: Script to narrate
         output_path: Path to save audio file
         voice: Voice ID/name to use (unused, kept for compatibility)
-        provider: "gemini" or "huggingface" (defaults to config)
+        provider: (ignored, Gemini only)
     
     Returns:
         (audio_path, word_timings)
     """
-    generator = TTSGenerator(provider=provider, voice=voice)
+    generator = TTSGenerator(provider="gemini", voice=voice)
     print(f"🎤 Using TTS provider: {generator.provider}")
     audio_path = generator.generate_audio(text, output_path)
     return audio_path, getattr(generator, 'word_timings', [])

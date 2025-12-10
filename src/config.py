@@ -124,9 +124,9 @@ NICKNAME_FONT_SIZE = 32
 TITLE_FONT_SIZE = 28
 INTRO_DURATION = 4.0  # How long intro card shows (seconds)
 
-# TTS Configuration
-# Providers: "gemini" (default), "huggingface"
-TTS_PROVIDER = os.getenv("TTS_PROVIDER", "gemini")
+# TTS Configuration (Gemini only)
+# Provider is fixed to Gemini for TTS
+TTS_PROVIDER = "gemini"
 # Gemini native TTS (Preview) model and voice
 GEMINI_TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts")
 GEMINI_TTS_VOICE_NAME = os.getenv("GEMINI_TTS_VOICE_NAME", None)  # If set, forces this voice
@@ -144,7 +144,6 @@ GEMINI_TTS_STYLE_NOTE = os.getenv(
     "GEMINI_TTS_STYLE_NOTE",
     "Read in a calm tone, slightly lower pitch, with minimal breathing sounds."
 )
-HUGGINGFACE_TTS_URL = os.getenv("HUGGINGFACE_TTS_URL", "https://huggingface.co/spaces/NihalGazi/Text-To-Speech-Unlimited")
 SKIP_AUDIO_GENERATION = False  # Temporarily skip audio generation (set to False to enable)
 TTS_VOICE = None  # Not used by Gemini/HF
 TTS_RATE = "+0%"  # Unused for Gemini/HF, kept for compatibility

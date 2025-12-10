@@ -18,6 +18,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List
+import argparse
 
 try:
     from zoneinfo import ZoneInfo
@@ -258,20 +259,25 @@ def _generate_daily_pack(pack_dir: Path) -> Dict:
     return manifest
 
 
-def run_forever() -> None:
+def run_forever(start_now: bool = False) -> None:
     """Main loop: daily generation + scheduled uploads, forever."""
-    # Wait until next midnight Pacific Time before starting
-    next_midnight = _next_midnight_pacific()
-    now = _now_pacific()
-    wait_seconds = (next_midnight - now).total_seconds()
-    
-    if wait_seconds > 0:
-        wait_hours = wait_seconds / 3600
-        print(f"⏰ Waiting until midnight Pacific Time ({next_midnight.strftime('%Y-%m-%d %H:%M:%S %Z')})")
+    # Wait until next midnight Pacific Time before starting (unless start_now is True)
+    if not start_now:
+        next_midnight = _next_midnight_pacific()
+        now = _now_pacific()
+        wait_seconds = (next_midnight - now).total_seconds()
+        
+        if wait_seconds > 0:
+            wait_hours = wait_seconds / 3600
+            print(f"⏰ Waiting until midnight Pacific Time ({next_midnight.strftime('%Y-%m-%d %H:%M:%S %Z')})")
+            print(f"   Current Pacific Time: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+            print(f"   Waiting {wait_hours:.2f} hours...")
+            time.sleep(wait_seconds)
+    else:
+        print("▶️ start_now enabled: beginning immediately, next cycles at Pacific midnight.")
+        now = _now_pacific()
         print(f"   Current Pacific Time: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
-        print(f"   Waiting {wait_hours:.2f} hours...")
-        time.sleep(wait_seconds)
-    
+        
     while True:
         cycle_start = _now_pacific()
         today = _today_str()
@@ -302,7 +308,18 @@ def run_forever() -> None:
             time.sleep(sleep_seconds)
 
 
+def main():
+    parser = argparse.ArgumentParser(description="Daily video generator/uploader scheduler")
+    parser.add_argument(
+        "--start-now",
+        action="store_true",
+        help="Start immediately (skip initial wait until Pacific midnight). Subsequent cycles still start at midnight PT."
+    )
+    args = parser.parse_args()
+    run_forever(start_now=args.start_now)
+
+
 if __name__ == "__main__":
-    run_forever()
+    main()
 
 
