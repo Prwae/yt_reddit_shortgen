@@ -15,13 +15,9 @@ class RedditScraper:
     """Scrapes Reddit posts without using API key"""
     
     def __init__(self):
-        # Use old.reddit.com which is friendlier to bots and JSON endpoints
-        self.base_url = "https://old.reddit.com"
-        # Strong User-Agent to reduce 403 blocks
+        self.base_url = "https://www.reddit.com"
         self.headers = {
-            "User-Agent": "RedditReadsBot/1.0 (+https://github.com/Prwae/yt_reddit_shortgen)",
-            "Accept": "application/json",
-            "Accept-Language": "en-US,en;q=0.8",
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
     
     def fetch_subreddit_posts(self, subreddit: str, sort: str = "hot", limit: int = 25) -> List[Dict]:
@@ -35,85 +31,64 @@ class RedditScraper:
             List of post dictionaries
         """
         # Handle top with time period
-        params = {"limit": limit}
-        url_path = f"/r/{subreddit}/{sort}.json"
         if "?" in sort:
-            # Format: "top?t=day" -> path="/r/sub/top.json" params include t=day
-            base_sort, query_part = sort.split("?", 1)
-            url_path = f"/r/{subreddit}/{base_sort}.json"
-            for piece in query_part.split("&"):
-                if "=" in piece:
-                    k, v = piece.split("=", 1)
-                    params[k] = v
-
-        url = f"{self.base_url}{url_path}"
-
-        retries = 3
-        backoff = 2
-
-        for attempt in range(retries):
-            try:
-                response = requests.get(url, headers=self.headers, params=params, timeout=15)
-                # If 429/403, backoff and retry
-                if response.status_code in (403, 429):
-                    wait = backoff ** attempt
-                    print(f"⚠️  Reddit returned {response.status_code} for r/{subreddit}, retrying in {wait}s...")
-                    time.sleep(wait)
-                    continue
-
-                response.raise_for_status()
-                data = response.json()
-                
-                # Check if we got rate limited or blocked via JSON error
-                if 'error' in data:
-                    error_msg = data.get('message', 'Unknown error')
-                    print(f"⚠️  Reddit API error for r/{subreddit}: {error_msg}")
-                    return []
-                
-                posts = []
-                for child in data.get('data', {}).get('children', []):
-                    post_data = child.get('data', {})
-                    
-                    # Filter criteria
-                    selftext = post_data.get('selftext', '')
-                    word_count = len(selftext.split()) if selftext else 0
-                    
-                    if (post_data.get('score', 0) >= MIN_UPVOTES and
-                        selftext and
-                        len(selftext) < MAX_POST_LENGTH and
-                        MIN_STORY_WORDS <= word_count <= MAX_STORY_WORDS and  # Filter by word count
-                        not post_data.get('over_18', False) and
-                        selftext != '[removed]' and
-                        selftext != '[deleted]'):
-                        
-                        posts.append({
-                            'id': post_data.get('id'),
-                            'title': post_data.get('title', ''),
-                            'text': post_data.get('selftext', ''),
-                            'author': post_data.get('author', ''),
-                            'score': post_data.get('score', 0),
-                            'subreddit': subreddit,
-                            'url': f"{self.base_url}{post_data.get('permalink', '')}",
-                            'created_utc': post_data.get('created_utc', 0)
-                        })
-                
-                return posts
+            # Format: "top?t=day" -> "/r/subreddit/top.json?t=day&limit=25"
+            base_sort = sort.split("?")[0]  # "top"
+            params = sort.split("?")[1] if "?" in sort else ""  # "t=day"
+            url = f"{self.base_url}/r/{subreddit}/{base_sort}.json?{params}&limit={limit}"
+        else:
+            url = f"{self.base_url}/r/{subreddit}/{sort}.json?limit={limit}"
+        
+        try:
+            response = requests.get(url, headers=self.headers, timeout=15)
+            response.raise_for_status()
+            data = response.json()
             
-            except requests.exceptions.RequestException as e:
-                if attempt < retries - 1:
-                    wait = backoff ** attempt
-                    print(f"⚠️  Network error fetching from r/{subreddit}: {e}. Retrying in {wait}s...")
-                    time.sleep(wait)
-                    continue
-                print(f"⚠️  Network error fetching from r/{subreddit}: {e}")
+            # Check if we got rate limited or blocked
+            if 'error' in data:
+                error_msg = data.get('message', 'Unknown error')
+                print(f"⚠️  Reddit API error for r/{subreddit}: {error_msg}")
                 return []
-            except json.JSONDecodeError as e:
-                print(f"⚠️  JSON decode error for r/{subreddit}: {e}")
-                print(f"   Response status: {response.status_code if 'response' in locals() else 'N/A'}")
-                return []
-            except Exception as e:
-                print(f"⚠️  Error fetching from r/{subreddit}: {e}")
-                return []
+            
+            posts = []
+            for child in data.get('data', {}).get('children', []):
+                post_data = child.get('data', {})
+                
+                # Filter criteria
+                selftext = post_data.get('selftext', '')
+                word_count = len(selftext.split()) if selftext else 0
+                
+                if (post_data.get('score', 0) >= MIN_UPVOTES and
+                    selftext and
+                    len(selftext) < MAX_POST_LENGTH and
+                    MIN_STORY_WORDS <= word_count <= MAX_STORY_WORDS and  # Filter by word count
+                    not post_data.get('over_18', False) and
+                    selftext != '[removed]' and
+                    selftext != '[deleted]'):
+                    
+                    posts.append({
+                        'id': post_data.get('id'),
+                        'title': post_data.get('title', ''),
+                        'text': post_data.get('selftext', ''),
+                        'author': post_data.get('author', ''),
+                        'score': post_data.get('score', 0),
+                        'subreddit': subreddit,
+                        'url': f"{self.base_url}{post_data.get('permalink', '')}",
+                        'created_utc': post_data.get('created_utc', 0)
+                    })
+            
+            return posts
+        
+        except requests.exceptions.RequestException as e:
+            print(f"⚠️  Network error fetching from r/{subreddit}: {e}")
+            return []
+        except json.JSONDecodeError as e:
+            print(f"⚠️  JSON decode error for r/{subreddit}: {e}")
+            print(f"   Response status: {response.status_code if 'response' in locals() else 'N/A'}")
+            return []
+        except Exception as e:
+            print(f"⚠️  Error fetching from r/{subreddit}: {e}")
+            return []
     
     def clean_text(self, text: str) -> str:
         """Clean and format Reddit post text"""
