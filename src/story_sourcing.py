@@ -15,19 +15,10 @@ class RedditScraper:
     """Scrapes Reddit posts without using API key"""
     
     def __init__(self):
-        # Try both modern and old reddit hosts; rotate on 403
-        self.hosts = [
-            "https://www.reddit.com",
-            "https://old.reddit.com",
-        ]
-        # Rotate user agents to reduce blocking
-        self.user_agents = [
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
-            "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0",
-            "Mozilla/5.0 (compatible; yt_reddit_shortgen/1.0; +https://github.com/Prwae/yt_reddit_shortgen)",
-        ]
-        self.session = requests.Session()
+        self.base_url = "https://www.reddit.com"
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
     
     def fetch_subreddit_posts(self, subreddit: str, sort: str = "hot", limit: int = 25) -> List[Dict]:
         """
@@ -44,90 +35,60 @@ class RedditScraper:
             # Format: "top?t=day" -> "/r/subreddit/top.json?t=day&limit=25"
             base_sort = sort.split("?")[0]  # "top"
             params = sort.split("?")[1] if "?" in sort else ""  # "t=day"
-            path = f"/r/{subreddit}/{base_sort}.json?{params}&limit={limit}&raw_json=1"
+            url = f"{self.base_url}/r/{subreddit}/{base_sort}.json?{params}&limit={limit}"
         else:
-            path = f"/r/{subreddit}/{sort}.json?limit={limit}&raw_json=1"
-
-        # Shuffle hosts to vary traffic
-        host_candidates = self.hosts[:]
-        random.shuffle(host_candidates)
-
-        # Try multiple hosts with a few retries, but move to next host quickly on 403
-        for host in host_candidates:
-            url = f"{host}{path}"
-            for attempt in range(2):
-                # Small jitter to reduce burstiness
-                time.sleep(0.8 + random.random())
-                ua = random.choice(self.user_agents)
-                headers = {
-                    "User-Agent": ua,
-                    "Accept": "application/json",
-                    "Accept-Language": "en-US,en;q=0.9",
-                    "Cache-Control": "no-cache",
-                }
-                try:
-                    response = self.session.get(url, headers=headers, timeout=15)
-                    if response.status_code == 403:
-                        # Blocked; backoff and try next attempt/host
-                        print(f"⚠️  403 from {host} for r/{subreddit} (attempt {attempt+1}); switching UA/host...")
-                        time.sleep(3.0 + attempt * 2 + random.random() * 2)
-                        continue
-                    response.raise_for_status()
-                    data = response.json()
-                    
-                    # Check if we got rate limited or blocked
-                    if 'error' in data:
-                        error_msg = data.get('message', 'Unknown error')
-                        print(f"⚠️  Reddit API error for r/{subreddit}: {error_msg}")
-                        return []
-                    
-                    posts = []
-                    for child in data.get('data', {}).get('children', []):
-                        post_data = child.get('data', {})
-                        
-                        # Filter criteria
-                        selftext = post_data.get('selftext', '')
-                        word_count = len(selftext.split()) if selftext else 0
-                        
-                        if (post_data.get('score', 0) >= MIN_UPVOTES and
-                            selftext and
-                            len(selftext) < MAX_POST_LENGTH and
-                            MIN_STORY_WORDS <= word_count <= MAX_STORY_WORDS and  # Filter by word count
-                            not post_data.get('over_18', False) and
-                            selftext != '[removed]' and
-                            selftext != '[deleted]'):
-                            
-                            posts.append({
-                                'id': post_data.get('id'),
-                                'title': post_data.get('title', ''),
-                                'text': post_data.get('selftext', ''),
-                                'author': post_data.get('author', ''),
-                                'score': post_data.get('score', 0),
-                                'subreddit': subreddit,
-                                'url': f"{host}{post_data.get('permalink', '')}",
-                                'created_utc': post_data.get('created_utc', 0)
-                            })
-                    
-                    return posts
+            url = f"{self.base_url}/r/{subreddit}/{sort}.json?limit={limit}"
+        
+        try:
+            response = requests.get(url, headers=self.headers, timeout=15)
+            response.raise_for_status()
+            data = response.json()
+            
+            # Check if we got rate limited or blocked
+            if 'error' in data:
+                error_msg = data.get('message', 'Unknown error')
+                print(f"⚠️  Reddit API error for r/{subreddit}: {error_msg}")
+                return []
+            
+            posts = []
+            for child in data.get('data', {}).get('children', []):
+                post_data = child.get('data', {})
                 
-                except requests.exceptions.RequestException as e:
-                    print(f"⚠️  Network error fetching from r/{subreddit} ({host}) attempt {attempt+1}: {e}")
-                    time.sleep(1.0 + attempt + random.random())
-                    continue
-                except json.JSONDecodeError as e:
-                    print(f"⚠️  JSON decode error for r/{subreddit} ({host}) attempt {attempt+1}: {e}")
-                    print(f"   Response status: {response.status_code if 'response' in locals() else 'N/A'}")
-                    time.sleep(1.0 + attempt + random.random())
-                    continue
-                except Exception as e:
-                    print(f"⚠️  Error fetching from r/{subreddit} ({host}) attempt {attempt+1}: {e}")
-                    time.sleep(1.0 + attempt + random.random())
-                    continue
-
-        # If all hosts/attempts failed, pause longer before returning
-        print(f"⚠️  Failed to fetch posts from r/{subreddit} after retries. Cooling down...")
-        time.sleep(5 + random.random() * 3)
-        return []
+                # Filter criteria
+                selftext = post_data.get('selftext', '')
+                word_count = len(selftext.split()) if selftext else 0
+                
+                if (post_data.get('score', 0) >= MIN_UPVOTES and
+                    selftext and
+                    len(selftext) < MAX_POST_LENGTH and
+                    MIN_STORY_WORDS <= word_count <= MAX_STORY_WORDS and  # Filter by word count
+                    not post_data.get('over_18', False) and
+                    selftext != '[removed]' and
+                    selftext != '[deleted]'):
+                    
+                    posts.append({
+                        'id': post_data.get('id'),
+                        'title': post_data.get('title', ''),
+                        'text': post_data.get('selftext', ''),
+                        'author': post_data.get('author', ''),
+                        'score': post_data.get('score', 0),
+                        'subreddit': subreddit,
+                        'url': f"{self.base_url}{post_data.get('permalink', '')}",
+                        'created_utc': post_data.get('created_utc', 0)
+                    })
+            
+            return posts
+        
+        except requests.exceptions.RequestException as e:
+            print(f"⚠️  Network error fetching from r/{subreddit}: {e}")
+            return []
+        except json.JSONDecodeError as e:
+            print(f"⚠️  JSON decode error for r/{subreddit}: {e}")
+            print(f"   Response status: {response.status_code if 'response' in locals() else 'N/A'}")
+            return []
+        except Exception as e:
+            print(f"⚠️  Error fetching from r/{subreddit}: {e}")
+            return []
     
     def clean_text(self, text: str) -> str:
         """Clean and format Reddit post text"""
