@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional
 import random
 import wave
+import numpy as np
 
 from .config import (
     TTS_PROVIDER, TTS_VOICE, TTS_RATE, TTS_PITCH, OUTPUT_DIR,
@@ -108,12 +109,25 @@ class TTSGenerator:
                 if not audio_bytes:
                     raise RuntimeError("No audio content returned from Gemini.")
 
+                # Post-process: tame harsh peaks (soft clip + peak normalize)
+                pcm = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32)
+                if pcm.size > 0:
+                    # Gentle soft clip to reduce screechy highs
+                    pcm = np.tanh(pcm / 32768.0 * 1.3) * 32767.0
+                    # Peak normalize to about -3 dBFS
+                    peak = np.max(np.abs(pcm))
+                    if peak > 0:
+                        target = 32767.0 * 0.707  # -3 dB
+                        gain = min(1.0, target / peak)
+                        pcm *= gain
+                pcm_int16 = pcm.astype(np.int16).tobytes()
+
                 # Write WAV (PCM 16-bit mono, sample rate from config)
                 with wave.open(output_path, "wb") as wf:
                     wf.setnchannels(1)
                     wf.setsampwidth(2)  # 16-bit
                     wf.setframerate(GEMINI_TTS_SAMPLE_RATE)
-                    wf.writeframes(audio_bytes)
+                    wf.writeframes(pcm_int16)
 
                 self.word_timings = []  # No timings available yet
                 if i > 0:
