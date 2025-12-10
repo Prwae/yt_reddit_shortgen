@@ -56,18 +56,21 @@ class RedditScraper:
         for host in host_candidates:
             url = f"{host}{path}"
             for attempt in range(2):
+                # Small jitter to reduce burstiness
+                time.sleep(0.8 + random.random())
                 ua = random.choice(self.user_agents)
                 headers = {
                     "User-Agent": ua,
                     "Accept": "application/json",
                     "Accept-Language": "en-US,en;q=0.9",
+                    "Cache-Control": "no-cache",
                 }
                 try:
                     response = self.session.get(url, headers=headers, timeout=15)
                     if response.status_code == 403:
                         # Blocked; backoff and try next attempt/host
                         print(f"⚠️  403 from {host} for r/{subreddit} (attempt {attempt+1}); switching UA/host...")
-                        time.sleep(1.5 + attempt + random.random())
+                        time.sleep(3.0 + attempt * 2 + random.random() * 2)
                         continue
                     response.raise_for_status()
                     data = response.json()
@@ -121,8 +124,9 @@ class RedditScraper:
                     time.sleep(1.0 + attempt + random.random())
                     continue
 
-        # If all hosts/attempts failed
-        print(f"⚠️  Failed to fetch posts from r/{subreddit} after retries.")
+        # If all hosts/attempts failed, pause longer before returning
+        print(f"⚠️  Failed to fetch posts from r/{subreddit} after retries. Cooling down...")
+        time.sleep(5 + random.random() * 3)
         return []
     
     def clean_text(self, text: str) -> str:
