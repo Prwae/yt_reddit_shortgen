@@ -357,10 +357,10 @@ class VideoAssembler:
     
     def _create_subtitle_image(self, text: str) -> Image.Image:
         """Create a subtitle image using PIL with bubbly font (preserves aspect ratio, NO STRETCHING)"""
-        # Ensure single line (1-2 words max)
+        # Ensure single word (one word per subtitle)
         words = text.split()
         if len(words) > SUBTITLE_WORDS_PER_LINE:
-            text = ' '.join(words[:SUBTITLE_WORDS_PER_LINE])
+            text = words[0]  # Take only the first word
         
         # Load bubbly font (Comic Sans or similar rounded font)
         font = self._get_bubbly_font(SUBTITLE_FONT_SIZE)
