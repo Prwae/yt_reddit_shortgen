@@ -109,11 +109,15 @@ class TTSGenerator:
                 if not audio_bytes:
                     raise RuntimeError("No audio content returned from Gemini.")
 
-                # Post-process: tame harsh peaks (soft clip + peak normalize)
+                # Post-process: tame harsh peaks, normalize, and remove background noise
                 pcm = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32)
                 if pcm.size > 0:
                     # Gentle soft clip to reduce screechy highs
                     pcm = np.tanh(pcm / 32768.0 * 1.3) * 32767.0
+                    
+                    # Noise reduction: remove background noise
+                    pcm = self._reduce_noise(pcm)
+                    
                     # Peak normalize to about -3 dBFS
                     peak = np.max(np.abs(pcm))
                     if peak > 0:
@@ -160,6 +164,68 @@ class TTSGenerator:
 
         # All keys failed
         raise RuntimeError(f"All Gemini API keys failed. Last error: {last_exception}")
+    
+    def _reduce_noise(self, audio: np.ndarray) -> np.ndarray:
+        """
+        Reduce background noise from audio using spectral subtraction and noise gate.
+        
+        Args:
+            audio: Audio signal as float32 array
+        
+        Returns:
+            Denoised audio signal
+        """
+        try:
+            from scipy import signal
+        except ImportError:
+            # Fallback: simple noise gate if scipy not available
+            return self._simple_noise_gate(audio)
+        
+        # Convert to normalized float
+        audio_norm = audio / 32768.0
+        
+        # High-pass filter to remove low-frequency noise (below 80 Hz)
+        # This removes rumble, hum, and other low-frequency background noise
+        nyquist = GEMINI_TTS_SAMPLE_RATE / 2
+        high_cutoff = 80.0 / nyquist
+        b, a = signal.butter(4, high_cutoff, btype='high')
+        audio_norm = signal.filtfilt(b, a, audio_norm)
+        
+        # Noise gate: remove very quiet sections (likely background noise)
+        # Calculate RMS energy in small windows
+        window_size = int(GEMINI_TTS_SAMPLE_RATE * 0.05)  # 50ms windows
+        if window_size < len(audio_norm):
+            # Estimate noise floor from first 200ms (typically quiet)
+            noise_sample_size = min(int(GEMINI_TTS_SAMPLE_RATE * 0.2), len(audio_norm) // 4)
+            noise_floor = np.std(audio_norm[:noise_sample_size])
+            threshold = noise_floor * 2.5  # Gate threshold
+            
+            # Apply noise gate: attenuate sections below threshold
+            for i in range(0, len(audio_norm), window_size):
+                window = audio_norm[i:i+window_size]
+                if len(window) > 0:
+                    rms = np.sqrt(np.mean(window ** 2))
+                    if rms < threshold:
+                        # Gradually fade out quiet sections
+                        fade_factor = max(0.0, (rms / threshold) ** 2)
+                        audio_norm[i:i+len(window)] *= fade_factor
+        
+        # Convert back to int16 range
+        return audio_norm * 32768.0
+    
+    def _simple_noise_gate(self, audio: np.ndarray) -> np.ndarray:
+        """Simple noise gate fallback if scipy not available."""
+        # Estimate noise floor from first 200ms
+        noise_sample_size = min(int(GEMINI_TTS_SAMPLE_RATE * 0.2), len(audio) // 4)
+        if noise_sample_size > 0:
+            noise_floor = np.std(audio[:noise_sample_size])
+            threshold = noise_floor * 2.5
+            
+            # Simple gate: zero out samples below threshold
+            mask = np.abs(audio) > threshold
+            audio = audio * mask
+        
+        return audio
 
 
 def generate_narration(text: str, 
