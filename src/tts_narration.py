@@ -159,35 +159,47 @@ class TTSGenerator:
         raise RuntimeError(f"All Gemini API keys failed. Last error: {last_exception}")
 
     def _generate_edge_tts(self, text: str, output_path: str) -> str:
-        """Generate audio via Edge-TTS (Microsoft Edge TTS)."""
+        """Generate audio via Edge-TTS (Microsoft Edge TTS) with retry logic."""
         try:
             import edge_tts
         except ImportError as e:
             raise ImportError("edge-tts not installed. Install with: pip install edge-tts") from e
+        
+        # Import aiohttp for error handling (it's a dependency of edge-tts)
+        try:
+            import aiohttp
+        except ImportError:
+            aiohttp = None  # Will handle errors generically if aiohttp not available
 
         # Ensure WAV output (edge-tts outputs as MP3 by default, but we'll convert)
         if not output_path.lower().endswith(".wav"):
             output_path = str(Path(output_path).with_suffix(".wav"))
 
+        max_retries = 3
+        retry_delays = [2, 5, 10]  # Exponential backoff delays in seconds
+        
         async def generate():
-            # Select voice
+            # Select voice (cache it to avoid re-fetching on retries)
             voice = self.voice or EDGE_TTS_VOICE
             if not voice:
                 # Get available voices and filter for English
-                voices = await edge_tts.list_voices()
-                english_voices = [v for v in voices if v["Locale"].startswith("en-")]
-                
-                if EDGE_TTS_RANDOMIZE and english_voices:
-                    voice = random.choice(english_voices)["Name"]
-                elif english_voices:
-                    # Prefer US English, then any English
-                    us_voices = [v for v in english_voices if v["Locale"].startswith("en-US")]
-                    if us_voices:
-                        voice = us_voices[0]["Name"]
+                try:
+                    voices = await edge_tts.list_voices()
+                    english_voices = [v for v in voices if v["Locale"].startswith("en-")]
+                    
+                    if EDGE_TTS_RANDOMIZE and english_voices:
+                        voice = random.choice(english_voices)["Name"]
+                    elif english_voices:
+                        # Prefer US English, then any English
+                        us_voices = [v for v in english_voices if v["Locale"].startswith("en-US")]
+                        if us_voices:
+                            voice = us_voices[0]["Name"]
+                        else:
+                            voice = english_voices[0]["Name"]
                     else:
-                        voice = english_voices[0]["Name"]
-                else:
-                    raise RuntimeError("No English voices found in Edge-TTS")
+                        raise RuntimeError("No English voices found in Edge-TTS")
+                except Exception as e:
+                    raise RuntimeError(f"Failed to fetch Edge-TTS voices: {e}")
             
             self.edge_tts_voice = voice
             print(f"🎤 Using Edge-TTS voice: {voice}")
@@ -201,55 +213,109 @@ class TTSGenerator:
             escaped_text = html.escape(text)
             ssml_text = f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US"><prosody rate="{rate}" pitch="{pitch}">{escaped_text}</prosody></speak>'
             
-            # Generate audio and collect word timings
-            communicate = edge_tts.Communicate(ssml_text, voice)
-            
-            # Collect word timings while generating
-            word_timings = []
-            audio_data = b""
-            
-            async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
-                    audio_data += chunk["data"]
-                elif chunk["type"] == "WordBoundary":
-                    # Edge-TTS provides word boundaries with offset in 100-nanosecond units
-                    offset = chunk.get("offset", 0) / 10_000_000  # Convert to seconds
-                    duration = chunk.get("duration", 0) / 10_000_000  # Convert to seconds
-                    word_text = chunk.get("text", "").strip()
-                    if word_text:
-                        word_timings.append({
-                            "word": word_text,
-                            "start": offset,
-                            "end": offset + duration
-                        })
-            
-            # Save audio data
-            temp_mp3 = output_path.replace(".wav", ".mp3")
-            with open(temp_mp3, "wb") as f:
-                f.write(audio_data)
-            
-            # Convert MP3 to WAV using pydub or moviepy
-            try:
-                from pydub import AudioSegment
-                audio = AudioSegment.from_mp3(temp_mp3)
-                audio.export(output_path, format="wav")
-                Path(temp_mp3).unlink()  # Delete temp MP3
-            except ImportError:
-                # Fallback: use moviepy if pydub not available
+            # Retry logic for Edge-TTS generation
+            last_exception = None
+            for attempt in range(max_retries):
                 try:
-                    from moviepy.editor import AudioFileClip
-                    audio = AudioFileClip(temp_mp3)
-                    audio.write_audiofile(output_path, logger=None)
-                    audio.close()
-                    Path(temp_mp3).unlink()  # Delete temp MP3
+                    # Generate audio and collect word timings
+                    communicate = edge_tts.Communicate(ssml_text, voice)
+                    
+                    # Collect word timings while generating
+                    word_timings = []
+                    audio_data = b""
+                    
+                    async for chunk in communicate.stream():
+                        if chunk["type"] == "audio":
+                            audio_data += chunk["data"]
+                        elif chunk["type"] == "WordBoundary":
+                            # Edge-TTS provides word boundaries with offset in 100-nanosecond units
+                            offset = chunk.get("offset", 0) / 10_000_000  # Convert to seconds
+                            duration = chunk.get("duration", 0) / 10_000_000  # Convert to seconds
+                            word_text = chunk.get("text", "").strip()
+                            if word_text:
+                                word_timings.append({
+                                    "word": word_text,
+                                    "start": offset,
+                                    "end": offset + duration
+                                })
+                    
+                    # Check if we got audio data
+                    if not audio_data:
+                        raise RuntimeError("No audio data received from Edge-TTS")
+                    
+                    # Save audio data
+                    temp_mp3 = output_path.replace(".wav", ".mp3")
+                    with open(temp_mp3, "wb") as f:
+                        f.write(audio_data)
+                    
+                    # Convert MP3 to WAV using pydub or moviepy
+                    try:
+                        from pydub import AudioSegment
+                        audio = AudioSegment.from_mp3(temp_mp3)
+                        audio.export(output_path, format="wav")
+                        Path(temp_mp3).unlink()  # Delete temp MP3
+                    except ImportError:
+                        # Fallback: use moviepy if pydub not available
+                        try:
+                            from moviepy.editor import AudioFileClip
+                            audio = AudioFileClip(temp_mp3)
+                            audio.write_audiofile(output_path, logger=None)
+                            audio.close()
+                            Path(temp_mp3).unlink()  # Delete temp MP3
+                        except Exception as e:
+                            # If conversion fails, just rename MP3 to WAV (not ideal but works)
+                            print(f"⚠️  Could not convert MP3 to WAV: {e}")
+                            print(f"   Using MP3 file instead. Install pydub for better compatibility.")
+                            Path(temp_mp3).rename(output_path.replace(".wav", ".mp3"))
+                            output_path = output_path.replace(".wav", ".mp3")
+                    
+                    self.word_timings = word_timings
+                    return  # Success!
+                    
                 except Exception as e:
-                    # If conversion fails, just rename MP3 to WAV (not ideal but works)
-                    print(f"⚠️  Could not convert MP3 to WAV: {e}")
-                    print(f"   Using MP3 file instead. Install pydub for better compatibility.")
-                    Path(temp_mp3).rename(output_path.replace(".wav", ".mp3"))
-                    output_path = output_path.replace(".wav", ".mp3")
+                    # Check if it's an aiohttp error (network/WebSocket issues)
+                    is_network_error = False
+                    if aiohttp:
+                        is_network_error = isinstance(e, (aiohttp.ClientError, aiohttp.WSServerHandshakeError))
+                    else:
+                        # Check error message for network/WebSocket indicators
+                        error_msg = str(e).lower()
+                        is_network_error = any(indicator in error_msg for indicator in [
+                            '403', 'forbidden', 'wsserverhandshake', 'websocket', 
+                            'connection', 'network', 'invalid response status'
+                        ])
+                    
+                    if is_network_error:
+                        # Network/WebSocket errors - retry with backoff
+                        last_exception = e
+                        error_msg = str(e).lower()
+                        
+                        # Check if it's a 403 or rate limit error
+                        if "403" in str(e) or "forbidden" in error_msg or "rate limit" in error_msg:
+                            if attempt < max_retries - 1:
+                                delay = retry_delays[attempt]
+                                print(f"⚠️  Edge-TTS request failed (403/rate limit): {e}")
+                                print(f"   Retrying in {delay} seconds... (attempt {attempt + 1}/{max_retries})")
+                                await asyncio.sleep(delay)
+                                continue
+                            else:
+                                raise RuntimeError(f"Edge-TTS failed after {max_retries} attempts (403/rate limit). Last error: {e}")
+                        else:
+                            # Other network errors - retry once
+                            if attempt < max_retries - 1:
+                                delay = retry_delays[attempt]
+                                print(f"⚠️  Edge-TTS network error: {e}")
+                                print(f"   Retrying in {delay} seconds... (attempt {attempt + 1}/{max_retries})")
+                                await asyncio.sleep(delay)
+                                continue
+                            else:
+                                raise
+                    else:
+                        # Other errors - don't retry
+                        raise RuntimeError(f"Edge-TTS generation failed: {e}") from e
             
-            self.word_timings = word_timings
+            # All retries exhausted
+            raise RuntimeError(f"Edge-TTS failed after {max_retries} attempts. Last error: {last_exception}")
         
         # Run async generation
         asyncio.run(generate())
