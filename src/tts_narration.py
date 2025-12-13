@@ -1,30 +1,36 @@
 """
-TTS Narration Module - Gemini native TTS (no fallbacks)
+TTS Narration Module - Supports Gemini and Edge-TTS
 """
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Tuple
 import random
 import wave
-import numpy as np
+import asyncio
+import json
+import html
 
 from .config import (
     TTS_PROVIDER, TTS_VOICE, TTS_RATE, TTS_PITCH, OUTPUT_DIR,
     GEMINI_API_KEY, GEMINI_API_KEYS, GEMINI_TTS_MODEL, GEMINI_TTS_VOICE_NAME, GEMINI_TTS_VOICES,
-    GEMINI_TTS_RANDOMIZE, GEMINI_TTS_SAMPLE_RATE, GEMINI_TTS_STYLE_NOTE
+    GEMINI_TTS_RANDOMIZE, GEMINI_TTS_SAMPLE_RATE, GEMINI_TTS_STYLE_NOTE,
+    EDGE_TTS_VOICE, EDGE_TTS_RANDOMIZE, EDGE_TTS_RATE, EDGE_TTS_PITCH
 )
 
 
 class TTSGenerator:
-    """Generates text-to-speech narration using Gemini only."""
+    """Generates text-to-speech narration using Gemini or Edge-TTS."""
 
     def __init__(self, 
                  provider: Optional[str] = None,
                  voice: Optional[str] = None,
                  use_elevenlabs: Optional[bool] = None):
-        # Gemini/HF do not return word timings; keep for API compatibility
         self.word_timings = []
-        self.provider = provider or TTS_PROVIDER
+        self.provider = (provider or TTS_PROVIDER).lower()
         self.voice = voice or TTS_VOICE  # kept for compatibility
+
+        # Validate provider
+        if self.provider not in ["gemini", "edge-tts"]:
+            raise ValueError(f"Unsupported TTS provider: {self.provider}. Use 'gemini' or 'edge-tts'.")
 
         # Choose Gemini voice
         if self.provider == "gemini":
@@ -36,14 +42,13 @@ class TTSGenerator:
                 self.gemini_voice = GEMINI_TTS_VOICES[0]
             else:
                 self.gemini_voice = "Kore"
-        else:
-            self.gemini_voice = "Kore"
-
-        # Provider availability checks
-        if not GEMINI_API_KEYS:
-            raise ValueError("No Gemini API keys set. Set GEMINI_API_KEY in .env.")
-        # Force provider to gemini
-        self.provider = "gemini"
+            
+            # Provider availability checks for Gemini
+            if not GEMINI_API_KEYS:
+                raise ValueError("No Gemini API keys set. Set GEMINI_API_KEY in .env or switch to edge-tts.")
+        
+        # Edge-TTS voice selection (will be done when needed)
+        self.edge_tts_voice = None
 
     def generate_audio(self, text: str, output_path: Optional[str] = None) -> str:
         """Generate TTS audio and return path."""
@@ -51,12 +56,17 @@ class TTSGenerator:
             output_path = str(OUTPUT_DIR / "narration.wav")
 
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-        # Prefer .wav because Gemini returns PCM
+        # Prefer .wav for compatibility
         if not output_path.lower().endswith(".wav"):
             output_path = str(Path(output_path).with_suffix(".wav"))
 
-        # Only Gemini is supported
-        return self._generate_gemini_tts(text, output_path)
+        # Route to appropriate provider
+        if self.provider == "gemini":
+            return self._generate_gemini_tts(text, output_path)
+        elif self.provider == "edge-tts":
+            return self._generate_edge_tts(text, output_path)
+        else:
+            raise ValueError(f"Unsupported provider: {self.provider}")
 
     def _generate_gemini_tts(self, text: str, output_path: str) -> str:
         """Generate audio via Gemini native TTS (PCM -> WAV) with multiple API key fallback."""
@@ -109,29 +119,12 @@ class TTSGenerator:
                 if not audio_bytes:
                     raise RuntimeError("No audio content returned from Gemini.")
 
-                # Post-process: tame harsh peaks, normalize, and remove background noise
-                pcm = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32)
-                if pcm.size > 0:
-                    # Gentle soft clip to reduce screechy highs
-                    pcm = np.tanh(pcm / 32768.0 * 1.3) * 32767.0
-                    
-                    # Noise reduction: remove background noise
-                    pcm = self._reduce_noise(pcm)
-                    
-                    # Peak normalize to about -3 dBFS
-                    peak = np.max(np.abs(pcm))
-                    if peak > 0:
-                        target = 32767.0 * 0.707  # -3 dB
-                        gain = min(1.0, target / peak)
-                        pcm *= gain
-                pcm_int16 = pcm.astype(np.int16).tobytes()
-
                 # Write WAV (PCM 16-bit mono, sample rate from config)
                 with wave.open(output_path, "wb") as wf:
                     wf.setnchannels(1)
                     wf.setsampwidth(2)  # 16-bit
                     wf.setframerate(GEMINI_TTS_SAMPLE_RATE)
-                    wf.writeframes(pcm_int16)
+                    wf.writeframes(audio_bytes)
 
                 self.word_timings = []  # No timings available yet
                 if i > 0:
@@ -164,68 +157,107 @@ class TTSGenerator:
 
         # All keys failed
         raise RuntimeError(f"All Gemini API keys failed. Last error: {last_exception}")
-    
-    def _reduce_noise(self, audio: np.ndarray) -> np.ndarray:
-        """
-        Reduce background noise from audio using spectral subtraction and noise gate.
-        
-        Args:
-            audio: Audio signal as float32 array
-        
-        Returns:
-            Denoised audio signal
-        """
+
+    def _generate_edge_tts(self, text: str, output_path: str) -> str:
+        """Generate audio via Edge-TTS (Microsoft Edge TTS)."""
         try:
-            from scipy import signal
-        except ImportError:
-            # Fallback: simple noise gate if scipy not available
-            return self._simple_noise_gate(audio)
-        
-        # Convert to normalized float
-        audio_norm = audio / 32768.0
-        
-        # High-pass filter to remove low-frequency noise (below 80 Hz)
-        # This removes rumble, hum, and other low-frequency background noise
-        nyquist = GEMINI_TTS_SAMPLE_RATE / 2
-        high_cutoff = 80.0 / nyquist
-        b, a = signal.butter(4, high_cutoff, btype='high')
-        audio_norm = signal.filtfilt(b, a, audio_norm)
-        
-        # Noise gate: remove very quiet sections (likely background noise)
-        # Calculate RMS energy in small windows
-        window_size = int(GEMINI_TTS_SAMPLE_RATE * 0.05)  # 50ms windows
-        if window_size < len(audio_norm):
-            # Estimate noise floor from first 200ms (typically quiet)
-            noise_sample_size = min(int(GEMINI_TTS_SAMPLE_RATE * 0.2), len(audio_norm) // 4)
-            noise_floor = np.std(audio_norm[:noise_sample_size])
-            threshold = noise_floor * 2.5  # Gate threshold
+            import edge_tts
+        except ImportError as e:
+            raise ImportError("edge-tts not installed. Install with: pip install edge-tts") from e
+
+        # Ensure WAV output (edge-tts outputs as MP3 by default, but we'll convert)
+        if not output_path.lower().endswith(".wav"):
+            output_path = str(Path(output_path).with_suffix(".wav"))
+
+        async def generate():
+            # Select voice
+            voice = self.voice or EDGE_TTS_VOICE
+            if not voice:
+                # Get available voices and filter for English
+                voices = await edge_tts.list_voices()
+                english_voices = [v for v in voices if v["Locale"].startswith("en-")]
+                
+                if EDGE_TTS_RANDOMIZE and english_voices:
+                    voice = random.choice(english_voices)["Name"]
+                elif english_voices:
+                    # Prefer US English, then any English
+                    us_voices = [v for v in english_voices if v["Locale"].startswith("en-US")]
+                    if us_voices:
+                        voice = us_voices[0]["Name"]
+                    else:
+                        voice = english_voices[0]["Name"]
+                else:
+                    raise RuntimeError("No English voices found in Edge-TTS")
             
-            # Apply noise gate: attenuate sections below threshold
-            for i in range(0, len(audio_norm), window_size):
-                window = audio_norm[i:i+window_size]
-                if len(window) > 0:
-                    rms = np.sqrt(np.mean(window ** 2))
-                    if rms < threshold:
-                        # Gradually fade out quiet sections
-                        fade_factor = max(0.0, (rms / threshold) ** 2)
-                        audio_norm[i:i+len(window)] *= fade_factor
-        
-        # Convert back to int16 range
-        return audio_norm * 32768.0
-    
-    def _simple_noise_gate(self, audio: np.ndarray) -> np.ndarray:
-        """Simple noise gate fallback if scipy not available."""
-        # Estimate noise floor from first 200ms
-        noise_sample_size = min(int(GEMINI_TTS_SAMPLE_RATE * 0.2), len(audio) // 4)
-        if noise_sample_size > 0:
-            noise_floor = np.std(audio[:noise_sample_size])
-            threshold = noise_floor * 2.5
+            self.edge_tts_voice = voice
+            print(f"🎤 Using Edge-TTS voice: {voice}")
+
+            # Generate audio with SSML for rate and pitch control
+            rate = EDGE_TTS_RATE if EDGE_TTS_RATE else "+0%"
+            pitch = EDGE_TTS_PITCH if EDGE_TTS_PITCH else "+0Hz"
             
-            # Simple gate: zero out samples below threshold
-            mask = np.abs(audio) > threshold
-            audio = audio * mask
+            # Create SSML with rate and pitch adjustments
+            # Escape XML special characters in text
+            escaped_text = html.escape(text)
+            ssml_text = f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US"><prosody rate="{rate}" pitch="{pitch}">{escaped_text}</prosody></speak>'
+            
+            # Generate audio and collect word timings
+            communicate = edge_tts.Communicate(ssml_text, voice)
+            
+            # Collect word timings while generating
+            word_timings = []
+            audio_data = b""
+            
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    audio_data += chunk["data"]
+                elif chunk["type"] == "WordBoundary":
+                    # Edge-TTS provides word boundaries with offset in 100-nanosecond units
+                    offset = chunk.get("offset", 0) / 10_000_000  # Convert to seconds
+                    duration = chunk.get("duration", 0) / 10_000_000  # Convert to seconds
+                    word_text = chunk.get("text", "").strip()
+                    if word_text:
+                        word_timings.append({
+                            "word": word_text,
+                            "start": offset,
+                            "end": offset + duration
+                        })
+            
+            # Save audio data
+            temp_mp3 = output_path.replace(".wav", ".mp3")
+            with open(temp_mp3, "wb") as f:
+                f.write(audio_data)
+            
+            # Convert MP3 to WAV using pydub or moviepy
+            try:
+                from pydub import AudioSegment
+                audio = AudioSegment.from_mp3(temp_mp3)
+                audio.export(output_path, format="wav")
+                Path(temp_mp3).unlink()  # Delete temp MP3
+            except ImportError:
+                # Fallback: use moviepy if pydub not available
+                try:
+                    from moviepy.editor import AudioFileClip
+                    audio = AudioFileClip(temp_mp3)
+                    audio.write_audiofile(output_path, logger=None)
+                    audio.close()
+                    Path(temp_mp3).unlink()  # Delete temp MP3
+                except Exception as e:
+                    # If conversion fails, just rename MP3 to WAV (not ideal but works)
+                    print(f"⚠️  Could not convert MP3 to WAV: {e}")
+                    print(f"   Using MP3 file instead. Install pydub for better compatibility.")
+                    Path(temp_mp3).rename(output_path.replace(".wav", ".mp3"))
+                    output_path = output_path.replace(".wav", ".mp3")
+            
+            self.word_timings = word_timings
         
-        return audio
+        # Run async generation
+        asyncio.run(generate())
+        
+        print(f"✓ Generated audio with Edge-TTS to {output_path}")
+        if self.word_timings:
+            print(f"   Collected {len(self.word_timings)} word timings")
+        return output_path
 
 
 def generate_narration(text: str, 
@@ -238,13 +270,13 @@ def generate_narration(text: str,
     Args:
         text: Script to narrate
         output_path: Path to save audio file
-        voice: Voice ID/name to use (unused, kept for compatibility)
-        provider: (ignored, Gemini only)
+        voice: Voice ID/name to use (for edge-tts: voice name like "en-US-AriaNeural")
+        provider: TTS provider ("gemini" or "edge-tts")
     
     Returns:
         (audio_path, word_timings)
     """
-    generator = TTSGenerator(provider="gemini", voice=voice)
+    generator = TTSGenerator(provider=provider, voice=voice)
     print(f"🎤 Using TTS provider: {generator.provider}")
     audio_path = generator.generate_audio(text, output_path)
     return audio_path, getattr(generator, 'word_timings', [])

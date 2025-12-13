@@ -84,7 +84,7 @@ MAX_POST_LENGTH = 5000  # characters
 # With 1.35x speed multiplier, original content should be max 180 * 1.35 = 243 seconds
 # Reading speed: ~2.5 words per second, so max ~607 words
 MAX_VIDEO_DURATION_SECONDS = 180  # 3 minutes maximum
-VIDEO_SPEED_MULTIPLIER = 1.35  # Speed up video by 1.35x
+VIDEO_SPEED_MULTIPLIER = 1.2  # Speed up video by 1.35x
 # Story word count filtering: stories should be 400-600 words to fit in 3 minutes
 MIN_STORY_WORDS = 400  # Minimum words for a good story
 MAX_STORY_WORDS = 600  # Maximum words to fit in 3 minutes
@@ -124,9 +124,9 @@ NICKNAME_FONT_SIZE = 32
 TITLE_FONT_SIZE = 28
 INTRO_DURATION = 4.0  # How long intro card shows (seconds)
 
-# TTS Configuration (Gemini only)
-# Provider is fixed to Gemini for TTS
-TTS_PROVIDER = "gemini"
+# TTS Configuration
+# Providers: "gemini" (default) or "edge-tts"
+TTS_PROVIDER = os.getenv("TTS_PROVIDER", "gemini").lower()
 # Gemini native TTS (Preview) model and voice
 GEMINI_TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts")
 GEMINI_TTS_VOICE_NAME = os.getenv("GEMINI_TTS_VOICE_NAME", None)  # If set, forces this voice
@@ -142,12 +142,17 @@ GEMINI_TTS_RANDOMIZE = os.getenv("GEMINI_TTS_RANDOMIZE", "true").lower() == "tru
 GEMINI_TTS_SAMPLE_RATE = int(os.getenv("GEMINI_TTS_SAMPLE_RATE", "24000"))  # PCM sample rate
 GEMINI_TTS_STYLE_NOTE = os.getenv(
     "GEMINI_TTS_STYLE_NOTE",
-    "Read in a calm tone, slightly lower pitch, with minimal breathing sounds."
+    "Read in a neutral tone, without stops or pauses."
 )
+# Edge-TTS Configuration
+EDGE_TTS_VOICE = os.getenv("EDGE_TTS_VOICE", None)  # If set, forces this voice (e.g., "en-US-AriaNeural")
+EDGE_TTS_RANDOMIZE = os.getenv("EDGE_TTS_RANDOMIZE", "true").lower() == "true"
+EDGE_TTS_RATE = os.getenv("EDGE_TTS_RATE", "+0%")  # Speech rate adjustment
+EDGE_TTS_PITCH = os.getenv("EDGE_TTS_PITCH", "+0Hz")  # Pitch adjustment
 SKIP_AUDIO_GENERATION = False  # Temporarily skip audio generation (set to False to enable)
-TTS_VOICE = None  # Not used by Gemini/HF
-TTS_RATE = "+0%"  # Unused for Gemini/HF, kept for compatibility
-TTS_PITCH = "+0Hz"  # Unused for Gemini/HF, kept for compatibility
+TTS_VOICE = None  # Legacy compatibility
+TTS_RATE = "+0%"  # Legacy compatibility
+TTS_PITCH = "+0Hz"  # Legacy compatibility
 
 # Subtitle fine-tuning
 SUBTITLE_LEAD_SECONDS = float(os.getenv("SUBTITLE_LEAD_SECONDS", "-0.10"))  # Negative = delay (shift later), positive = lead (shift earlier)
