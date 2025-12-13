@@ -54,6 +54,10 @@ videos/music/*
 !videos/**/*.txt
 !videos/**/*.gitkeep
 
+# Manual uploads (keep folder, ignore video files)
+manual_uploads/*
+!manual_uploads/.gitkeep
+
 
 
 
