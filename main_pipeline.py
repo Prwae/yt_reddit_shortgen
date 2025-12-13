@@ -47,6 +47,62 @@ class VideoPipeline:
         Returns:
             Dict with paths to generated files and metadata
         """
+        # Retry logic for TTS errors - try up to 3 different posts
+        max_retries = 3
+        failed_story_ids = []  # Track failed story IDs to avoid retrying them
+        
+        for attempt in range(max_retries):
+            try:
+                result = self._generate_video_internal(
+                    subreddits=subreddits,
+                    background_video=background_video,
+                    music_file=music_file,
+                    intro_image=intro_image,
+                    custom_story=custom_story,
+                    attempt=attempt + 1,
+                    max_retries=max_retries,
+                    avoid_story_ids=failed_story_ids
+                )
+                # Success! Return the result
+                return result
+            except Exception as e:
+                error_msg = str(e).lower()
+                # Check if it's a TTS/speech generation error
+                is_tts_error = any(keyword in error_msg for keyword in [
+                    'unable to generate speech',
+                    'cannot generate speech',
+                    'failed to generate speech',
+                    'speech generation',
+                    'generate speech from',
+                    'no audio content',
+                    'audio generation failed',
+                    'tts generation failed'
+                ])
+                
+                if is_tts_error and attempt < max_retries - 1:
+                    # Try to extract story ID from the error or from the internal state
+                    # We'll track it in the internal method
+                    print(f"\n⚠️  TTS generation failed (attempt {attempt + 1}/{max_retries}): {e}")
+                    print("   Retrying with a different post...")
+                    time.sleep(2)  # Brief delay before retry
+                    # Note: failed_story_ids will be populated by _generate_video_internal
+                    continue
+                else:
+                    # Not a TTS error, or we've exhausted retries
+                    raise
+    
+    def _generate_video_internal(self,
+                                 subreddits: Optional[list] = None,
+                                 background_video: Optional[str] = None,
+                                 music_file: Optional[str] = None,
+                                 intro_image: Optional[str] = None,
+                                 custom_story: Optional[Dict] = None,
+                                 attempt: int = 1,
+                                 max_retries: int = 3,
+                                 avoid_story_ids: Optional[list] = None) -> Dict:
+        """
+        Internal method to generate a video (called by generate_video with retry logic)
+        """
         # Create output folder for this video
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         video_output_dir = self.output_dir / f"video_{timestamp}"
@@ -74,7 +130,10 @@ class VideoPipeline:
                     story = custom_story
                 else:
                     # Get list of recently used story IDs to avoid duplicates
+                    # Also avoid story IDs that failed TTS in previous retry attempts
                     avoid_ids = get_avoid_ids()
+                    if avoid_story_ids:
+                        avoid_ids = list(set(avoid_ids + avoid_story_ids))
                     story = fetch_story(subreddits, avoid_ids)
                 
                 if not story:
@@ -91,10 +150,6 @@ class VideoPipeline:
                             "- All posts being filtered out (check MIN_STORY_WORDS, MAX_STORY_WORDS, MIN_UPVOTES in config.py)\n"
                             "- Reddit API changes or blocking"
                         )
-                
-                # Add to cache to avoid using again
-                if 'id' in story:
-                    add_story_id(story['id'])
                 
                 print(f"✓ Found story: {story['title'][:50]}...")
                 print(f"  From r/{story.get('subreddit', 'unknown')} ({story.get('score', 0)} upvotes)")
@@ -152,8 +207,36 @@ class VideoPipeline:
             else:
                 print("🎤 Generating narration...")
                 narration_path = str(video_output_dir / "narration.mp3")
-                narration_path, word_timings = generate_narration(rewritten_story['script'], narration_path)
-                print("✓ Narration generated")
+                try:
+                    narration_path, word_timings = generate_narration(rewritten_story['script'], narration_path)
+                    print("✓ Narration generated")
+                    
+                    # Only add story to cache after TTS succeeds
+                    # This allows retries with different stories if TTS fails
+                    if not FAST_RENDER_MODE and 'id' in story:
+                        add_story_id(story['id'])
+                except Exception as e:
+                    error_msg = str(e).lower()
+                    # Check if it's a TTS/speech generation error
+                    is_tts_error = any(keyword in error_msg for keyword in [
+                        'unable to generate speech',
+                        'cannot generate speech',
+                        'failed to generate speech',
+                        'speech generation',
+                        'generate speech from',
+                        'no audio content',
+                        'audio generation failed'
+                    ])
+                    
+                    if is_tts_error:
+                        # Add this story ID to the avoid list for retries
+                        if not FAST_RENDER_MODE and 'id' in story and avoid_story_ids is not None:
+                            avoid_story_ids.append(story['id'])
+                        # Re-raise as a specific exception that will trigger retry
+                        raise RuntimeError(f"TTS generation failed: {e}")
+                    else:
+                        # Other errors, re-raise as-is
+                        raise
             
             # Step 6: Generate subtitles
             print("📝 Generating subtitles...")
