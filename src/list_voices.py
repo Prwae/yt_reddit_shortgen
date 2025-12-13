@@ -8,23 +8,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 print("=" * 60)
-print("Available TTS Voices")
+print("Available TTS Voices - Edge-TTS")
 print("=" * 60)
-
-# Check Gemini voices
-from src.config import GEMINI_TTS_VOICES, GEMINI_API_KEYS
-if GEMINI_API_KEYS:
-    print("\n[Gemini TTS Voices]")
-    print("-" * 60)
-    print("Available Gemini voices:")
-    for i, voice in enumerate(GEMINI_TTS_VOICES, 1):
-        print(f"   {i}. {voice}")
-    print("\n💡 To use a specific voice, set in .env:")
-    print("   GEMINI_TTS_VOICE_NAME=Kore")
-    print("   GEMINI_TTS_RANDOMIZE=false  # Set to false to use specific voice")
-else:
-    print("\n[Gemini TTS]")
-    print("⚠️  GEMINI_API_KEY not set. Skipping Gemini voices.")
 
 # Check Edge TTS voices
 print("\n[Edge-TTS Voices]")
@@ -51,9 +36,7 @@ print("   Or visit: https://speech.platform.bing.com/consumer/speech/synthesize/
 
 print("\n" + "=" * 60)
 print("To change voice, set in .env file:")
-print("   TTS_PROVIDER=edge-tts  # or 'gemini'")
-print("   EDGE_TTS_VOICE_NAME=en-US-JennyNeural  # For Edge-TTS")
-print("   GEMINI_TTS_VOICE_NAME=Kore  # For Gemini")
+print("   EDGE_TTS_VOICE_NAME=en-US-JennyNeural  # Force specific voice")
 print("   EDGE_TTS_RANDOMIZE=false  # Set to false to use specific voice")
 print("=" * 60)
 

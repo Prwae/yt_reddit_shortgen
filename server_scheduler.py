@@ -136,13 +136,10 @@ def _is_tts_error(err: Exception) -> bool:
         'audio generation',
         'generate audio',
         'speech',
-        'gemini.*tts',  # Gemini TTS errors
         'no audio content',
         'audio.*failed',
         'narration.*failed',
-        'generate.*failed',
-        'gemini api keys failed',
-        'no gemini api keys'
+        'generate.*failed'
     ]
     
     # Check if any keyword appears in the error message
@@ -153,7 +150,7 @@ def _is_tts_error(err: Exception) -> bool:
     # Check error type - if it's a RuntimeError or ValueError from TTS context
     if isinstance(err, (RuntimeError, ValueError, ImportError)):
         # Check if it's likely a TTS error (not a generic error)
-        if any(k in msg for k in ['gemini', 'api key', 'audio', 'narration', 'tts']):
+        if any(k in msg for k in ['audio', 'narration', 'tts']):
             return True
     
     return False

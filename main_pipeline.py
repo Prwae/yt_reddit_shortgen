@@ -85,7 +85,7 @@ class VideoPipeline:
                         'tts', 'text-to-speech', 'text to speech', 'narration',
                         'audio generation', 'generate audio', 'speech',
                         'no audio content', 'audio.*failed', 'narration.*failed',
-                        'generate.*failed', 'gemini api keys failed', 'no gemini api keys'
+                        'generate.*failed'
                     ]
                     is_tts_error = any(keyword in error_msg for keyword in tts_keywords)
                 
@@ -244,7 +244,7 @@ class VideoPipeline:
                             'tts', 'text-to-speech', 'text to speech', 'narration',
                             'audio generation', 'generate audio', 'speech',
                             'no audio content', 'audio.*failed', 'narration.*failed',
-                            'generate.*failed', 'gemini api keys failed', 'no gemini api keys'
+                            'generate.*failed'
                         ]
                         is_tts_error = any(keyword in error_msg for keyword in tts_keywords)
                     

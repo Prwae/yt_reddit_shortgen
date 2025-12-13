@@ -125,30 +125,7 @@ TITLE_FONT_SIZE = 28
 INTRO_DURATION = 4.0  # How long intro card shows (seconds)
 
 # TTS Configuration
-# Providers: "gemini" (default) or "edge-tts"
-TTS_PROVIDER = os.getenv("TTS_PROVIDER", "gemini").lower()
-
-# Gemini native TTS (Preview) model and voice
-GEMINI_TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts")
-GEMINI_TTS_VOICE_NAME = os.getenv("GEMINI_TTS_VOICE_NAME", None)  # If set, forces this voice
-GEMINI_TTS_VOICES = [
-    "Sadaltager",
-    "Charon",
-    "Kore",
-    "Orus",
-    "Leda",  # Fixed: was "Lede", should be "Leda"
-    "Aoede",
-]
-GEMINI_TTS_RANDOMIZE = os.getenv("GEMINI_TTS_RANDOMIZE", "true").lower() == "true"
-GEMINI_TTS_SAMPLE_RATE = int(os.getenv("GEMINI_TTS_SAMPLE_RATE", "24000"))  # PCM sample rate
-GEMINI_TTS_STYLE_NOTE = os.getenv(
-    "GEMINI_TTS_STYLE_NOTE",
-    "Read in a neutral tone, without stops or pauses."
-)
-
-# Edge-TTS Configuration
-# Popular Edge-TTS voices (Microsoft Azure Neural Voices)
-# Format: "locale-Gender-Name" (e.g., "en-US-AriaNeural")
+# Uses Edge-TTS (Microsoft Azure Neural Voices) - Free, no API keys required
 EDGE_TTS_VOICE_NAME = os.getenv("EDGE_TTS_VOICE_NAME", None)  # If set, forces this voice
 EDGE_TTS_VOICES = [
     "en-US-AriaNeural",      # Female, US English
