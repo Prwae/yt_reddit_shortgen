@@ -1,0 +1,4 @@
+# This folder is for manually placing video folders to upload
+# Place video folders (with final_video.mp4 and metadata.json) here
+# Run manual_uploader.py to upload and delete them
+
