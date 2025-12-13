@@ -116,6 +116,22 @@ def _is_credit_error(err: Exception) -> bool:
     return any(k in msg for k in keywords)
 
 
+def _is_tts_error(err: Exception) -> bool:
+    """Check if error is related to TTS/speech generation."""
+    msg = str(err).lower()
+    keywords = [
+        'unable to generate speech',
+        'cannot generate speech',
+        'failed to generate speech',
+        'speech generation',
+        'generate speech from',
+        'no audio content',
+        'audio generation failed',
+        'tts generation failed'
+    ]
+    return any(k in msg for k in keywords)
+
+
 def _cleanup_old_packs() -> None:
     """Delete packs older than PACK_RETENTION_DAYS."""
     cutoff = _now_pacific().date() - timedelta(days=PACK_RETENTION_DAYS - 1)
@@ -165,29 +181,37 @@ def _upload_video(video_path: str, metadata_path: str, privacy_status: str = "pr
     )
 
 
-def _schedule_uploads(manifest: Dict, pack_dir: Path) -> None:
-    """Upload all videos for the pack at evenly spaced intervals across 24h."""
+def _schedule_uploads(manifest: Dict, pack_dir: Path, upload_all_now: bool = False) -> None:
+    """Upload videos for the pack.
+    
+    If upload_all_now is True, upload immediately without spacing.
+    Otherwise, spread uploads evenly across 24h (min 1 hour between uploads).
+    """
     videos = manifest.get("videos", [])
     pending = [v for v in videos if not v.get("uploaded")]
     if not pending:
         print("✓ All videos already uploaded for this pack.")
         return
 
-    # Calculate interval: spread uploads evenly over 24 hours
-    # But ensure minimum 1 hour between uploads to avoid rate limits
-    # YouTube default quota: ~6 uploads/day (1,600 units per upload, 10,000 units/day)
-    min_interval_seconds = 3600  # 1 hour minimum between uploads
-    ideal_interval = 24 * 3600 / max(1, len(videos))
-    interval_seconds = max(ideal_interval, min_interval_seconds)
+    # Upload immediately if requested
+    if upload_all_now:
+        interval_seconds = 0
+    else:
+        # Spread uploads evenly over 24 hours with a minimum 1-hour gap
+        # YouTube default quota: ~6 uploads/day (1,600 units per upload, 10,000 units/day)
+        min_interval_seconds = 3600  # 1 hour minimum between uploads
+        ideal_interval = 24 * 3600 / max(1, len(videos))
+        interval_seconds = max(ideal_interval, min_interval_seconds)
     
     start_time = _now_pacific()
 
     for idx, video in enumerate(pending):
-        scheduled_time = start_time + timedelta(seconds=interval_seconds * idx)
-        wait_seconds = (scheduled_time - _now_pacific()).total_seconds()
-        if wait_seconds > 0:
-            print(f"⏳ Waiting {wait_seconds/60:.1f} minutes until next upload slot...")
-            time.sleep(wait_seconds)
+        if interval_seconds > 0:
+            scheduled_time = start_time + timedelta(seconds=interval_seconds * idx)
+            wait_seconds = (scheduled_time - _now_pacific()).total_seconds()
+            if wait_seconds > 0:
+                print(f"⏳ Waiting {wait_seconds/60:.1f} minutes until next upload slot...")
+                time.sleep(wait_seconds)
 
         try:
             # Upload video to YouTube
@@ -226,18 +250,41 @@ def _generate_daily_pack(pack_dir: Path) -> Dict:
     manifest = _load_manifest(pack_dir)
     pipeline = VideoPipeline(output_dir=pack_dir)
 
+    consecutive_failures = 0
+    max_consecutive_failures = 5  # Stop after 5 consecutive failures (non-TTS errors)
+    
     while True:
         try:
             result = pipeline.generate_video()
             if not result.get("success"):
                 err_msg = result.get("error", "unknown error")
+                err_exception = Exception(err_msg)
                 print(f"⚠️  Generation failed: {err_msg}")
-                if _is_credit_error(Exception(err_msg)):
+                
+                # Check if it's a credit/quota error - stop immediately
+                if _is_credit_error(err_exception):
+                    print("⚠️  Stopping generation due to credit/quota exhaustion.")
+                    break
+                
+                # Check if it's a TTS error - continue trying with different posts
+                if _is_tts_error(err_exception):
+                    consecutive_failures = 0  # Reset counter for TTS errors
+                    print("⚠️  TTS generation failed after retries. Trying next post...")
+                    time.sleep(2)  # Brief delay before next attempt
+                    continue
+                
+                # Other errors - increment failure counter
+                consecutive_failures += 1
+                if consecutive_failures >= max_consecutive_failures:
+                    print(f"⚠️  Stopping generation after {max_consecutive_failures} consecutive failures.")
                     break
                 else:
-                    # Non-credit error: stop this cycle but keep what we have
-                    break
+                    print(f"⚠️  Non-TTS error ({consecutive_failures}/{max_consecutive_failures}). Trying next post...")
+                    time.sleep(2)  # Brief delay before next attempt
+                    continue
 
+            # Success! Reset failure counter and add video to manifest
+            consecutive_failures = 0
             manifest["videos"].append(
                 {
                     "video_path": result["video_path"],
@@ -252,14 +299,33 @@ def _generate_daily_pack(pack_dir: Path) -> Dict:
             print(f"🎥 Generated video: {result['video_path']}")
         except Exception as e:
             print(f"❌ Generation exception: {e}")
+            
+            # Check if it's a credit/quota error - stop immediately
             if _is_credit_error(e):
-                print("Stopping generation due to suspected credit/quota exhaustion.")
-            break
+                print("⚠️  Stopping generation due to suspected credit/quota exhaustion.")
+                break
+            
+            # Check if it's a TTS error - continue trying
+            if _is_tts_error(e):
+                consecutive_failures = 0  # Reset counter for TTS errors
+                print("⚠️  TTS generation failed. Trying next post...")
+                time.sleep(2)  # Brief delay before next attempt
+                continue
+            
+            # Other exceptions - increment failure counter
+            consecutive_failures += 1
+            if consecutive_failures >= max_consecutive_failures:
+                print(f"⚠️  Stopping generation after {max_consecutive_failures} consecutive exceptions.")
+                break
+            else:
+                print(f"⚠️  Exception ({consecutive_failures}/{max_consecutive_failures}). Trying next post...")
+                time.sleep(2)  # Brief delay before next attempt
+                continue
 
     return manifest
 
 
-def run_forever(start_now: bool = False) -> None:
+def run_forever(start_now: bool = False, upload_all_now: bool = False) -> None:
     """Main loop: daily generation + scheduled uploads, forever."""
     # Wait until next midnight Pacific Time before starting (unless start_now is True)
     if not start_now:
@@ -296,7 +362,7 @@ def run_forever(start_now: bool = False) -> None:
         if not manifest.get("videos"):
             print("Nothing to upload for this pack.")
         else:
-            _schedule_uploads(manifest, pack_dir)
+            _schedule_uploads(manifest, pack_dir, upload_all_now=upload_all_now)
 
         # Sleep until next midnight Pacific Time
         next_midnight = _next_midnight_pacific()
@@ -315,8 +381,13 @@ def main():
         action="store_true",
         help="Start immediately (skip initial wait until Pacific midnight). Subsequent cycles still start at midnight PT."
     )
+    parser.add_argument(
+        "--upload-all-now",
+        action="store_true",
+        help="Upload all videos immediately without spacing (ignores 24h distribution)."
+    )
     args = parser.parse_args()
-    run_forever(start_now=args.start_now)
+    run_forever(start_now=args.start_now, upload_all_now=args.upload_all_now)
 
 
 if __name__ == "__main__":
