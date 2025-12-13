@@ -117,19 +117,46 @@ def _is_credit_error(err: Exception) -> bool:
 
 
 def _is_tts_error(err: Exception) -> bool:
-    """Check if error is related to TTS/speech generation."""
+    """Check if error is related to TTS (any TTS-related error, not just speech generation)."""
+    # Check if error originates from TTS module by examining traceback
+    try:
+        tb_str = ''.join(traceback.format_exception(type(err), err, err.__traceback__))
+        if 'tts_narration' in tb_str.lower() or 'generate_narration' in tb_str.lower():
+            return True
+    except:
+        pass
+    
+    # Check error message for TTS-related keywords
     msg = str(err).lower()
     keywords = [
-        'unable to generate speech',
-        'cannot generate speech',
-        'failed to generate speech',
-        'speech generation',
-        'generate speech from',
+        'tts',  # Any mention of TTS
+        'text-to-speech',
+        'text to speech',
+        'narration',
+        'audio generation',
+        'generate audio',
+        'speech',
+        'gemini.*tts',  # Gemini TTS errors
         'no audio content',
-        'audio generation failed',
-        'tts generation failed'
+        'audio.*failed',
+        'narration.*failed',
+        'generate.*failed',
+        'gemini api keys failed',
+        'no gemini api keys'
     ]
-    return any(k in msg for k in keywords)
+    
+    # Check if any keyword appears in the error message
+    for keyword in keywords:
+        if keyword in msg:
+            return True
+    
+    # Check error type - if it's a RuntimeError or ValueError from TTS context
+    if isinstance(err, (RuntimeError, ValueError, ImportError)):
+        # Check if it's likely a TTS error (not a generic error)
+        if any(k in msg for k in ['gemini', 'api key', 'audio', 'narration', 'tts']):
+            return True
+    
+    return False
 
 
 def _cleanup_old_packs() -> None:

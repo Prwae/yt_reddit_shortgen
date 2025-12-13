@@ -3,6 +3,7 @@ Main Pipeline Orchestrator - Coordinates all modules to create complete videos
 """
 import json
 import time
+import traceback
 from pathlib import Path
 from typing import Optional, Dict
 from datetime import datetime
@@ -67,17 +68,26 @@ class VideoPipeline:
                 return result
             except Exception as e:
                 error_msg = str(e).lower()
-                # Check if it's a TTS/speech generation error
-                is_tts_error = any(keyword in error_msg for keyword in [
-                    'unable to generate speech',
-                    'cannot generate speech',
-                    'failed to generate speech',
-                    'speech generation',
-                    'generate speech from',
-                    'no audio content',
-                    'audio generation failed',
-                    'tts generation failed'
-                ])
+                # Check if it's any TTS-related error (not just speech generation)
+                is_tts_error = False
+                
+                # Check if error originates from TTS module
+                try:
+                    tb_str = ''.join(traceback.format_exception(type(e), e, e.__traceback__))
+                    if 'tts_narration' in tb_str.lower() or 'generate_narration' in tb_str.lower():
+                        is_tts_error = True
+                except:
+                    pass
+                
+                # Also check error message for TTS-related keywords
+                if not is_tts_error:
+                    tts_keywords = [
+                        'tts', 'text-to-speech', 'text to speech', 'narration',
+                        'audio generation', 'generate audio', 'speech',
+                        'no audio content', 'audio.*failed', 'narration.*failed',
+                        'generate.*failed', 'gemini api keys failed', 'no gemini api keys'
+                    ]
+                    is_tts_error = any(keyword in error_msg for keyword in tts_keywords)
                 
                 if is_tts_error and attempt < max_retries - 1:
                     # Try to extract story ID from the error or from the internal state
@@ -217,16 +227,26 @@ class VideoPipeline:
                         add_story_id(story['id'])
                 except Exception as e:
                     error_msg = str(e).lower()
-                    # Check if it's a TTS/speech generation error
-                    is_tts_error = any(keyword in error_msg for keyword in [
-                        'unable to generate speech',
-                        'cannot generate speech',
-                        'failed to generate speech',
-                        'speech generation',
-                        'generate speech from',
-                        'no audio content',
-                        'audio generation failed'
-                    ])
+                    # Check if it's any TTS-related error (not just speech generation)
+                    is_tts_error = False
+                    
+                    # Check if error originates from TTS module
+                    try:
+                        tb_str = ''.join(traceback.format_exception(type(e), e, e.__traceback__))
+                        if 'tts_narration' in tb_str.lower() or 'generate_narration' in tb_str.lower():
+                            is_tts_error = True
+                    except:
+                        pass
+                    
+                    # Also check error message for TTS-related keywords
+                    if not is_tts_error:
+                        tts_keywords = [
+                            'tts', 'text-to-speech', 'text to speech', 'narration',
+                            'audio generation', 'generate audio', 'speech',
+                            'no audio content', 'audio.*failed', 'narration.*failed',
+                            'generate.*failed', 'gemini api keys failed', 'no gemini api keys'
+                        ]
+                        is_tts_error = any(keyword in error_msg for keyword in tts_keywords)
                     
                     if is_tts_error:
                         # Add this story ID to the avoid list for retries
