@@ -11,54 +11,50 @@ print("=" * 60)
 print("Available TTS Voices")
 print("=" * 60)
 
-# Check ElevenLabs voices
-elevenlabs_key = os.getenv("ELEVENLABS_API_KEY", "")
-if elevenlabs_key:
-    print("\n[ElevenLabs Voices]")
+# Check Gemini voices
+from src.config import GEMINI_TTS_VOICES, GEMINI_API_KEYS
+if GEMINI_API_KEYS:
+    print("\n[Gemini TTS Voices]")
     print("-" * 60)
-    try:
-        from .tts_narration import TTSGenerator
-        voices = TTSGenerator.list_elevenlabs_voices()
-        
-        if voices:
-            print(f"Found {len(voices)} voices:\n")
-            for i, voice in enumerate(voices[:20], 1):  # Show first 20
-                print(f"{i}. {voice['name']}")
-                print(f"   ID: {voice['voice_id']}")
-                print(f"   Category: {voice.get('category', 'unknown')}")
-                print()
-            
-            if len(voices) > 20:
-                print(f"... and {len(voices) - 20} more voices")
-            
-            print("\n💡 Popular natural female voices:")
-            print("   - Bella: EXAVITQu4vr4xnSDxMaL (very natural)")
-            print("   - Domi: ThT5KcBeYPX3keUQqHPh (expressive)")
-            print("   - Rachel: 21m00Tcm4TlvDq8ikWAM (original)")
-        else:
-            print("No voices found. Check your API key.")
-    except Exception as e:
-        print(f"Error listing ElevenLabs voices: {e}")
-        print("Make sure ELEVENLABS_API_KEY is set in .env")
+    print("Available Gemini voices:")
+    for i, voice in enumerate(GEMINI_TTS_VOICES, 1):
+        print(f"   {i}. {voice}")
+    print("\n💡 To use a specific voice, set in .env:")
+    print("   GEMINI_TTS_VOICE_NAME=Kore")
+    print("   GEMINI_TTS_RANDOMIZE=false  # Set to false to use specific voice")
 else:
-    print("\n[ElevenLabs]")
-    print("⚠️  ELEVENLABS_API_KEY not set. Skipping ElevenLabs voices.")
+    print("\n[Gemini TTS]")
+    print("⚠️  GEMINI_API_KEY not set. Skipping Gemini voices.")
 
 # Check Edge TTS voices
-print("\n[Edge TTS Voices]")
+print("\n[Edge-TTS Voices]")
 print("-" * 60)
-print("Popular natural female voices:")
-print("   - en-US-JennyNeural (very natural, recommended)")
+print("Popular voices (configured in code):")
+from src.config import EDGE_TTS_VOICES
+for i, voice in enumerate(EDGE_TTS_VOICES, 1):
+    print(f"   {i}. {voice}")
+
+print("\n💡 Popular natural female voices:")
 print("   - en-US-AriaNeural (clear, professional)")
+print("   - en-US-JennyNeural (very natural, recommended)")
 print("   - en-GB-SoniaNeural (British, natural)")
 print("   - en-AU-NatashaNeural (Australian, natural)")
-print("\nTo see all Edge TTS voices, run:")
-print("   python -c \"import edge_tts; import asyncio; asyncio.run(edge_tts.list_voices())\"")
+
+print("\n💡 Popular male voices:")
+print("   - en-US-GuyNeural (US English, male)")
+print("   - en-GB-RyanNeural (British, male)")
+print("   - en-AU-WilliamNeural (Australian, male)")
+
+print("\n📋 To see ALL available Edge-TTS voices, run:")
+print("   python -c \"import edge_tts; import asyncio; voices = asyncio.run(edge_tts.list_voices()); [print(f'{v['ShortName']} - {v['Gender']} - {v['Locale']}') for v in voices if 'en' in v['Locale']]\"")
+print("   Or visit: https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices")
 
 print("\n" + "=" * 60)
 print("To change voice, set in .env file:")
-print("   ELEVENLABS_VOICE_ID=EXAVITQu4vr4xnSDxMaL  # For ElevenLabs")
-print("   EDGE_TTS_VOICE=en-US-JennyNeural  # For Edge TTS")
+print("   TTS_PROVIDER=edge-tts  # or 'gemini'")
+print("   EDGE_TTS_VOICE_NAME=en-US-JennyNeural  # For Edge-TTS")
+print("   GEMINI_TTS_VOICE_NAME=Kore  # For Gemini")
+print("   EDGE_TTS_RANDOMIZE=false  # Set to false to use specific voice")
 print("=" * 60)
 
 

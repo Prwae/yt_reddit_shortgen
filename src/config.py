@@ -127,6 +127,7 @@ INTRO_DURATION = 4.0  # How long intro card shows (seconds)
 # TTS Configuration
 # Providers: "gemini" (default) or "edge-tts"
 TTS_PROVIDER = os.getenv("TTS_PROVIDER", "gemini").lower()
+
 # Gemini native TTS (Preview) model and voice
 GEMINI_TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts")
 GEMINI_TTS_VOICE_NAME = os.getenv("GEMINI_TTS_VOICE_NAME", None)  # If set, forces this voice
@@ -144,15 +145,26 @@ GEMINI_TTS_STYLE_NOTE = os.getenv(
     "GEMINI_TTS_STYLE_NOTE",
     "Read in a neutral tone, without stops or pauses."
 )
+
 # Edge-TTS Configuration
-EDGE_TTS_VOICE = os.getenv("EDGE_TTS_VOICE", None)  # If set, forces this voice (e.g., "en-US-AriaNeural")
+# Popular Edge-TTS voices (Microsoft Azure Neural Voices)
+# Format: "locale-Gender-Name" (e.g., "en-US-AriaNeural")
+EDGE_TTS_VOICE_NAME = os.getenv("EDGE_TTS_VOICE_NAME", None)  # If set, forces this voice
+EDGE_TTS_VOICES = [
+    "en-US-AriaNeural",      # Female, US English
+    "en-US-JennyNeural",     # Female, US English
+    "en-US-GuyNeural",       # Male, US English
+    "en-GB-SoniaNeural",     # Female, British English
+    "en-GB-RyanNeural",      # Male, British English
+    "en-AU-NatashaNeural",   # Female, Australian English
+    "en-AU-WilliamNeural",   # Male, Australian English
+]
 EDGE_TTS_RANDOMIZE = os.getenv("EDGE_TTS_RANDOMIZE", "true").lower() == "true"
-EDGE_TTS_RATE = os.getenv("EDGE_TTS_RATE", "+0%")  # Speech rate adjustment
-EDGE_TTS_PITCH = os.getenv("EDGE_TTS_PITCH", "+0Hz")  # Pitch adjustment
+
 SKIP_AUDIO_GENERATION = False  # Temporarily skip audio generation (set to False to enable)
-TTS_VOICE = None  # Legacy compatibility
-TTS_RATE = "+0%"  # Legacy compatibility
-TTS_PITCH = "+0Hz"  # Legacy compatibility
+TTS_VOICE = None  # Not used by Gemini/Edge-TTS, kept for compatibility
+TTS_RATE = "+0%"  # Unused for Gemini/Edge-TTS, kept for compatibility
+TTS_PITCH = "+0Hz"  # Unused for Gemini/Edge-TTS, kept for compatibility
 
 # Subtitle fine-tuning
 SUBTITLE_LEAD_SECONDS = float(os.getenv("SUBTITLE_LEAD_SECONDS", "-0.10"))  # Negative = delay (shift later), positive = lead (shift earlier)

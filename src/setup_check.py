@@ -129,36 +129,38 @@ def check_api_keys():
     load_dotenv()
     
     # Check for multiple Gemini API keys
-    from .config import GEMINI_API_KEYS
-    elevenlabs_key = os.getenv("ELEVENLABS_API_KEY", "")
-    tts_provider = os.getenv("TTS_PROVIDER", "elevenlabs")
+    from .config import GEMINI_API_KEYS, TTS_PROVIDER
     
     all_ok = True
     
-    if GEMINI_API_KEYS:
-        key_count = len(GEMINI_API_KEYS)
-        if key_count == 1:
-            print("✅ Gemini API key found")
-        else:
-            print(f"✅ Found {key_count} Gemini API keys (fallback enabled)")
-            print("   Keys will be tried in order if one fails")
-    else:
-        print("❌ No Gemini API keys set")
-        print("   Create a .env file with: GEMINI_API_KEY=your_key_here")
-        print("   For multiple keys: GEMINI_API_KEY=key1,key2,key3")
-        print("   Or use: GEMINI_API_KEY_1=key1, GEMINI_API_KEY_2=key2, etc.")
-        print("   Get your key from: https://makersuite.google.com/app/apikey")
-        all_ok = False
+    # Check TTS provider configuration
+    tts_provider = TTS_PROVIDER.lower()
+    print(f"📢 TTS Provider: {tts_provider}")
     
-    if tts_provider == "elevenlabs":
-        if elevenlabs_key:
-            print("✅ ElevenLabs API key found")
+    if tts_provider == "gemini":
+        if GEMINI_API_KEYS:
+            key_count = len(GEMINI_API_KEYS)
+            if key_count == 1:
+                print("✅ Gemini API key found")
+            else:
+                print(f"✅ Found {key_count} Gemini API keys (fallback enabled)")
+                print("   Keys will be tried in order if one fails")
         else:
-            print("⚠️  ElevenLabs API key not set (using Edge TTS fallback)")
-            print("   For better quality, add: ELEVENLABS_API_KEY=your_key_here")
-            print("   Get your key from: https://elevenlabs.io/app/settings/api-keys")
+            print("❌ No Gemini API keys set")
+            print("   Create a .env file with: GEMINI_API_KEY=your_key_here")
+            print("   For multiple keys: GEMINI_API_KEY=key1,key2,key3")
+            print("   Or use: GEMINI_API_KEY_1=key1, GEMINI_API_KEY_2=key2, etc.")
+            print("   Get your key from: https://makersuite.google.com/app/apikey")
+            all_ok = False
+    elif tts_provider == "edge-tts":
+        print("✅ Using Edge-TTS (no API key needed)")
+        if GEMINI_API_KEYS:
+            print("   Note: Gemini API keys are set but not required for Edge-TTS")
     else:
-        print("✅ Using Edge TTS (no API key needed)")
+        print(f"⚠️  Unknown TTS provider: {tts_provider}")
+        print("   Supported providers: 'gemini', 'edge-tts'")
+        print("   Set TTS_PROVIDER in .env file")
+        all_ok = False
     
     return all_ok
 
